@@ -60,6 +60,14 @@ Migraciones, modelos Eloquent y factories del modelo de datos completo ya existe
 
 `ComidaReal` es una entidad separada de `PlanComida` (no se sobrescribe el plan) — preserva el historial de "planificado vs. ejecutado". No cambiar este diseño sin discutirlo explícitamente.
 
+### Autenticación (implementada)
+
+Laravel Breeze (stack Blade, con Pest) instalado vía `laravel/breeze` (dev dependency) — provee registro, login, logout, recuperación/reseteo de contraseña y confirmación de contraseña. Rutas en `routes/auth.php` (`register`, `login`, `logout`, `forgot-password`, `reset-password/{token}`, `verify-email`, `confirm-password`). Vistas en `resources/views/auth/*`. Todas las rutas del área autenticada (`/dashboard`, `/profile`, `/profile/parametros`) están protegidas con el middleware `auth`.
+
+- **Parámetros nutricionales tras el registro:** en vez de extender el formulario de registro (para no complicar el flujo estándar de Breeze), tras registrarse el usuario es redirigido a una pantalla separada "Completa tu perfil" (`ProfileParametersController@edit`, ruta `GET /profile/parametros` → `profile.parametros.edit`) donde define `peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`. Se guarda con `PUT /profile/parametros` (`profile.parametros.update`) vía `ProfileParametersController@update`. Accesible en cualquier momento después desde el dropdown de navegación ("Parámetros nutricionales").
+- **`ProfileParametersRequest`** (`app/Http/Requests/ProfileParametersRequest.php`): valida los rangos de la sección 5/6 — `nivel_actividad` 1.2–1.725, `proteina_factor` 1.6–2.2, `grasa_factor` 0.6–1.0, `sexo` in(masculino,femenino), `tipo_deficit` in(porcentaje,fijo). No calcula `calorias_objetivo` aquí — eso es responsabilidad de `NutritionCalculatorService` (sección 5), que aún no existe; este Form Request solo persiste los parámetros base.
+- **Tests:** `tests/Feature/ProfileParametersTest.php` cubre acceso protegido por `auth`, edición exitosa, y validación fuera de rango (dataset con `nivel_actividad`, `proteina_factor`, `grasa_factor`, `sexo`, `tipo_deficit` inválidos). `tests/Feature/Auth/RegistrationTest.php` se ajustó para esperar redirect a `profile.parametros.edit` en vez de `dashboard`.
+
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
 Implementar exactamente así en `NutritionCalculatorService` (o el nombre que se use), con tests unitarios por cada fórmula:
