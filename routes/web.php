@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
 use Illuminate\Support\Facades\Route;
@@ -19,6 +20,12 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/profile/parametros', [ProfileParametersController::class, 'edit'])->name('profile.parametros.edit');
     Route::put('/profile/parametros', [ProfileParametersController::class, 'update'])->name('profile.parametros.update');
+
+    Route::get('/ingredientes', [IngredienteDisponibleController::class, 'create'])->name('ingredientes.create');
+    Route::post('/ingredientes', [IngredienteDisponibleController::class, 'store'])->name('ingredientes.store');
+    Route::get('/registros-diarios/{registroDiario}/ingredientes', [IngredienteDisponibleController::class, 'index'])->name('ingredientes.index');
+    Route::put('/ingredientes/{ingrediente}', [IngredienteDisponibleController::class, 'update'])->name('ingredientes.update');
+    Route::delete('/ingredientes/{ingrediente}', [IngredienteDisponibleController::class, 'destroy'])->name('ingredientes.destroy');
 });
 
 require __DIR__.'/auth.php';
