@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob",
+      "Bash(php artisan *)",
+      "Bash(php -v)",
+      "Bash(composer *)",
+      "Bash(git *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(./vendor/bin/pest *)",
+      "Bash(./vendor/bin/pint *)",
+      "Bash(vendor/bin/pest *)",
+      "Bash(vendor/bin/pint *)"
+    ]
+  }
+}
