@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ActividadFisicaController;
 use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\PlanComidaController;
@@ -34,6 +35,9 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/plan/{planComida}/comida-real', [ComidaRealController::class, 'create'])->name('comida-real.create');
     Route::post('/plan/{planComida}/comida-real', [ComidaRealController::class, 'store'])->name('comida-real.store');
+
+    Route::get('/actividades', [ActividadFisicaController::class, 'create'])->name('actividades.create');
+    Route::post('/actividades', [ActividadFisicaController::class, 'store'])->name('actividades.store');
 });
 
 require __DIR__.'/auth.php';

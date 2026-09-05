@@ -12,9 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'registro_diario_id',
     'tipo',
     'duracion_min',
+    'pasos',
     'calorias_dispositivo',
     'factor_correccion',
     'calorias_ajustadas',
+    'fuente',
 ])]
 class ActividadFisica extends Model
 {
@@ -30,6 +32,7 @@ class ActividadFisica extends Model
     {
         return [
             'duracion_min' => 'integer',
+            'pasos' => 'integer',
             'calorias_dispositivo' => 'decimal:2',
             'factor_correccion' => 'decimal:2',
             'calorias_ajustadas' => 'decimal:2',

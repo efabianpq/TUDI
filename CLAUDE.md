@@ -142,6 +142,34 @@ No hace falta una pasada de calorías propiamente dicha: por construcción de la
 
 **Tests:** `tests/Feature/ComidaRealTest.php` cubre: acceso protegido por `auth` y por dueño del `RegistroDiario` (403 cruzado entre usuarios), que registrar una `ComidaReal` actualiza `calorias_consumidas` del `RegistroDiario` (y que se acumula correctamente al registrar una segunda comida), que un exceso de calorías en el desayuno reduce proporcionalmente `calorias_estimadas` de almuerzo y cena (aún no registrados) sin tocar el desayuno ya registrado, y que subir una imagen (`Storage::fake('public')`) la deja accesible en `storage/comidas-reales/*` con la URL pública esperada.
 
+## 4.4. Actividad física (implementado)
+
+`app/Services/ActivityCorrectionService.php` decide qué `factor_correccion` aplica a una actividad y delega la multiplicación (`calorias_ajustadas = calorias_dispositivo * factor_correccion`) en `NutritionCalculatorService::calculateAdjustedActivityCalories`, que sigue siendo la única fuente de verdad de esa fórmula y de la validación del rango 0.8–0.9.
+
+**Factores de corrección por tipo de actividad** (constante pública `FACTORES_POR_TIPO`, todos dentro de 0.8–0.9):
+
+| Tipo | Factor | Motivo |
+|---|---|---|
+| caminata | 0.85 | Cardio de baja intensidad, wearables razonablemente calibrados (valor por defecto). |
+| trote | 0.85 | Ídem. |
+| ciclismo | 0.85 | Ídem. |
+| natación | 0.85 | Ídem. |
+| pesas | 0.80 | Los sensores ópticos de frecuencia cardíaca son menos fiables con movimientos intermitentes/explosivos; los dispositivos sobreestiman más el gasto en fuerza. |
+| *(cualquier otro tipo)* | 0.85 (`FACTOR_POR_DEFECTO`) | Valor conservador dentro del rango cuando no hay un factor específico documentado. |
+
+La comparación de `tipo` contra la tabla es case-insensitive (`mb_strtolower`).
+
+**Factor fuera de rango: rechazado, no normalizado.** `calcularCaloriasAjustadas()` acepta un `factorPersonalizado` opcional (pensado para uso interno/futuro, no expuesto en el formulario); si ese factor —o uno mal configurado en la tabla— cae fuera de 0.8–0.9, se propaga la `InvalidNutritionParameterException` que ya lanza `NutritionCalculatorService`, en vez de recortarlo (`clamp`) al límite más cercano. Normalizar en silencio escondería un error de configuración dentro de un cálculo de balance energético del usuario; se prefiere que falle de forma explícita.
+
+- **Columnas nuevas en `actividades_fisicas`** (migración `add_pasos_y_fuente_a_actividades_fisicas_table`): `pasos` (unsignedInteger, nullable) y `fuente` (enum `manual`/`dispositivo`, default `manual`). La columna de tipo de actividad ya existía como `tipo` (migración original de la sección 4) — el formulario y el Form Request usan el nombre `tipo_actividad` (más descriptivo de cara al usuario) y el controlador lo mapea a la columna `tipo` real; no se renombró la columna para no romper lo ya implementado.
+- **`ActividadFisicaRequest`** (`app/Http/Requests/`): `tipo_actividad` (string requerido), `duracion_min` (integer ≥ 1), `calorias_dispositivo` (numeric ≥ 0, requerido siempre — se necesita para calcular `calorias_ajustadas` incluso si `fuente` es `manual`), `pasos` (nullable, integer ≥ 0), `fuente` (requerido, `in:manual,dispositivo`).
+- **`ActividadFisicaController`** (`app/Http/Controllers/`), rutas bajo `auth`:
+  - `GET /actividades` (`actividades.create`) — formulario + listado de las actividades ya registradas hoy.
+  - `POST /actividades` (`actividades.store`) — crea (o reutiliza, mismo patrón que `IngredienteDisponibleController`) el `RegistroDiario` de hoy, registra la actividad con el factor ya aplicado, y recalcula `calorias_actividad_ajustada` del `RegistroDiario` como la suma de `calorias_ajustadas` de todas sus actividades — igual que `ComidaRealService` recalcula `calorias_consumidas` desde cero en vez de acumular con `+=`, para que sea idempotente. Todo dentro de una transacción.
+- **Vista** `resources/views/actividades/create.blade.php`: formulario simple (sin filas dinámicas, una actividad a la vez) y listado de "Actividades de hoy" con calorías del dispositivo, factor aplicado y calorías ajustadas. Enlace "Actividad física" añadido a `resources/views/layouts/navigation.blade.php`.
+
+**Tests:** `tests/Unit/ActivityCorrectionServiceTest.php` cubre el factor de un tipo conocido, el fallback al factor por defecto para un tipo no listado, insensibilidad a mayúsculas, y que un factor personalizado fuera de rango lanza excepción (no se normaliza) mientras uno dentro de rango sí sobreescribe la tabla. `tests/Feature/ActividadFisicaTest.php` cubre acceso protegido por `auth`, que registrar una actividad aplica el factor correcto y persiste `pasos`/`fuente`, creación automática del `RegistroDiario` de hoy, que `calorias_actividad_ajustada` refleja la suma correcta al registrar varias actividades el mismo día, y validación de `duracion_min`/`fuente` inválidos.
+
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
 Implementar exactamente así en `NutritionCalculatorService` (o el nombre que se use), con tests unitarios por cada fórmula:

@@ -23,9 +23,11 @@ class ActividadFisicaFactory extends Factory
             'registro_diario_id' => RegistroDiario::factory(),
             'tipo' => fake()->randomElement(['caminata', 'trote', 'ciclismo', 'pesas', 'natación']),
             'duracion_min' => fake()->numberBetween(10, 120),
+            'pasos' => fake()->numberBetween(0, 15000),
             'calorias_dispositivo' => $caloriasDispositivo,
             'factor_correccion' => $factorCorreccion,
             'calorias_ajustadas' => round($caloriasDispositivo * $factorCorreccion, 2),
+            'fuente' => fake()->randomElement(['manual', 'dispositivo']),
         ];
     }
 }

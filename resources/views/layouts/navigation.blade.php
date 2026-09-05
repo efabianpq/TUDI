@@ -23,6 +23,10 @@
                     <x-nav-link :href="route('planes.index')" :active="request()->routeIs('planes.*')">
                         {{ __('Plan de hoy') }}
                     </x-nav-link>
+
+                    <x-nav-link :href="route('actividades.create')" :active="request()->routeIs('actividades.*')">
+                        {{ __('Actividad física') }}
+                    </x-nav-link>
                 </div>
             </div>
 
@@ -89,6 +93,10 @@
 
             <x-responsive-nav-link :href="route('planes.index')" :active="request()->routeIs('planes.*')">
                 {{ __('Plan de hoy') }}
+            </x-responsive-nav-link>
+
+            <x-responsive-nav-link :href="route('actividades.create')" :active="request()->routeIs('actividades.*')">
+                {{ __('Actividad física') }}
             </x-responsive-nav-link>
         </div>
 
