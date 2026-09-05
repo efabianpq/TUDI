@@ -52,6 +52,17 @@ test('a user cannot log a comida real for another users plan', function () {
     ])->assertForbidden();
 });
 
+test('a user cannot see the comida real form for another users plan', function () {
+    $usuario = User::factory()->create();
+    $otroUsuario = User::factory()->create();
+    $registroDiario = registroConPlanes($otroUsuario);
+    $planComida = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->first();
+
+    $this->actingAs($usuario)
+        ->get(route('comida-real.create', $planComida))
+        ->assertForbidden();
+});
+
 test('logging a comida real updates calorias_consumidas on the registro diario', function () {
     $usuario = User::factory()->create();
     $registroDiario = registroConPlanes($usuario);

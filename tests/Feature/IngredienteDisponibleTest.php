@@ -134,6 +134,21 @@ test('an ingredient can be deleted', function () {
     expect(IngredienteDisponible::find($ingrediente->id))->toBeNull();
 });
 
+test('a user cannot update another users ingredient', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $otherRegistroDiario = RegistroDiario::factory()->for($otherUser, 'usuario')->create();
+    $ingrediente = IngredienteDisponible::factory()->for($otherRegistroDiario, 'registroDiario')->create(['nombre' => 'Avena']);
+
+    $response = $this
+        ->actingAs($user)
+        ->put(route('ingredientes.update', $ingrediente), ingredientePayload(['nombre' => 'Avena integral']));
+
+    $response->assertForbidden();
+
+    expect($ingrediente->fresh()->nombre)->toBe('Avena');
+});
+
 test('a user cannot delete another users ingredient', function () {
     $user = User::factory()->create();
     $otherUser = User::factory()->create();

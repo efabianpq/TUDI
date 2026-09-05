@@ -34,6 +34,18 @@ it('rechaza con 403 confirmar la recomendación de otro usuario', function () {
         ->assertForbidden();
 });
 
+it('rechaza con 403 rechazar la recomendación de otro usuario', function () {
+    $usuario = User::factory()->create();
+    $otro = User::factory()->create();
+    $recomendacion = crearRecomendacionPendiente($usuario);
+
+    $this->actingAs($otro)
+        ->post(route('recomendaciones.rechazar', $recomendacion))
+        ->assertForbidden();
+
+    expect($recomendacion->fresh()->estado)->toBe('pendiente');
+});
+
 it('confirmar una recomendación de ajuste calórico actualiza calorias_objetivo del usuario', function () {
     $usuario = User::factory()->create(['calorias_objetivo' => 2000]);
     $recomendacion = crearRecomendacionPendiente($usuario, 1850.0);
