@@ -25,6 +25,18 @@
                 </div>
             @endif
 
+            @if (session('status') === 'recomendacion-confirmada')
+                <div class="p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+                    {{ __('Recomendación confirmada.') }}
+                </div>
+            @endif
+
+            @if (session('status') === 'recomendacion-rechazada')
+                <div class="p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+                    {{ __('Recomendación rechazada.') }}
+                </div>
+            @endif
+
             @if ($errorResumen)
                 <div class="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
                     {{ $errorResumen }}
@@ -136,6 +148,19 @@
                                             ({{ $recomendacion->calorias_objetivo_sugeridas }} kcal)
                                         @endif
                                     </span>
+
+                                    @if ($recomendacion->estado === 'pendiente')
+                                        <div class="mt-2 flex gap-2">
+                                            <form method="post" action="{{ route('recomendaciones.confirmar', $recomendacion) }}">
+                                                @csrf
+                                                <x-primary-button type="submit">{{ __('Confirmar') }}</x-primary-button>
+                                            </form>
+                                            <form method="post" action="{{ route('recomendaciones.rechazar', $recomendacion) }}">
+                                                @csrf
+                                                <x-secondary-button type="submit">{{ __('Rechazar') }}</x-secondary-button>
+                                            </form>
+                                        </div>
+                                    @endif
                                 </li>
                             @endforeach
                         </ul>

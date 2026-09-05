@@ -7,6 +7,7 @@ use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
+use App\Http\Controllers\RecomendacionSistemaController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -43,6 +44,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/cierre', [CierreDiarioController::class, 'index'])->name('cierre.index');
     Route::post('/cierre', [CierreDiarioController::class, 'cerrar'])->name('cierre.cerrar');
     Route::post('/cierre/{registroDiario}/reabrir', [CierreDiarioController::class, 'reabrir'])->name('cierre.reabrir');
+
+    Route::post('/recomendaciones/{recomendacion}/confirmar', [RecomendacionSistemaController::class, 'confirmar'])->name('recomendaciones.confirmar');
+    Route::post('/recomendaciones/{recomendacion}/rechazar', [RecomendacionSistemaController::class, 'rechazar'])->name('recomendaciones.rechazar');
 });
 
 require __DIR__.'/auth.php';
