@@ -367,3 +367,57 @@ it('devuelve una serie histórica con huecos, no una excepción, cuando faltan d
     expect($serie)->toHaveCount(30)
         ->and(array_unique(array_column($serie, 'promedio_movil_peso_kg')))->toBe([null]);
 });
+
+it('calcula las variaciones semanales de peso comparando promedios móviles de 7 días consecutivos', function () {
+    $usuario = User::factory()->create();
+
+    // Cuatro bloques de 7 días, cada uno con un peso constante dentro del
+    // bloque: así el promedio móvil de cada ventana es exactamente ese valor
+    // y la variación semana a semana es fácil de verificar a mano.
+    $bloques = [
+        // diasAtras 21-27 (semana más antigua) => 79.5
+        [21, 27, 79.5],
+        // diasAtras 14-20 => 79.0
+        [14, 20, 79.0],
+        // diasAtras 7-13 => 78.5
+        [7, 13, 78.5],
+        // diasAtras 0-6 (semana más reciente) => 78.0
+        [0, 6, 78.0],
+    ];
+
+    foreach ($bloques as [$desde, $hasta, $peso]) {
+        for ($diasAtras = $desde; $diasAtras <= $hasta; $diasAtras++) {
+            diaConPeso($usuario, $diasAtras, $peso);
+        }
+    }
+
+    $variaciones = (new TrendAnalyticsService)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
+
+    // De la más antigua a la más reciente: 79.0-79.5, 78.5-79.0, 78.0-78.5.
+    expect($variaciones)->toHaveCount(3);
+    foreach ($variaciones as $variacion) {
+        expect($variacion)->toEqualWithDelta(-0.5, 0.001);
+    }
+});
+
+it('omite una variación semanal cuando falta el promedio de una de las dos semanas comparadas', function () {
+    $usuario = User::factory()->create();
+
+    // La semana intermedia (diasAtras 14-20) no tiene ningún peso apuntado:
+    // su promedio es null, así que las dos variaciones que la involucran se
+    // omiten en vez de compararse contra un dato inexistente.
+    foreach ([21, 22, 23, 24, 25, 26, 27] as $diasAtras) {
+        diaConPeso($usuario, $diasAtras, 79.5);
+    }
+    foreach ([7, 8, 9, 10, 11, 12, 13] as $diasAtras) {
+        diaConPeso($usuario, $diasAtras, 78.5);
+    }
+    foreach ([0, 1, 2, 3, 4, 5, 6] as $diasAtras) {
+        diaConPeso($usuario, $diasAtras, 78.0);
+    }
+
+    $variaciones = (new TrendAnalyticsService)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
+
+    expect($variaciones)->toHaveCount(1)
+        ->and($variaciones[0])->toEqualWithDelta(-0.5, 0.001);
+});

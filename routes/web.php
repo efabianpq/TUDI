@@ -10,6 +10,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
 use App\Http\Controllers\ProgresoController;
 use App\Http\Controllers\RecomendacionSistemaController;
+use App\Http\Controllers\RegistroPesoController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -42,6 +43,9 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/actividades', [ActividadFisicaController::class, 'create'])->name('actividades.create');
     Route::post('/actividades', [ActividadFisicaController::class, 'store'])->name('actividades.store');
+
+    Route::get('/peso', [RegistroPesoController::class, 'create'])->name('peso.create');
+    Route::post('/peso', [RegistroPesoController::class, 'store'])->name('peso.store');
 
     Route::get('/cierre', [CierreDiarioController::class, 'index'])->name('cierre.index');
     Route::post('/cierre', [CierreDiarioController::class, 'cerrar'])->name('cierre.cerrar');

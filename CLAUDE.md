@@ -250,7 +250,7 @@ Sin Form Request: ninguna de las tres acciones recibe entrada del usuario (el d�
 - **`calcularYPersistir(User, ?Carbon): MetricaTendencia`** — el mismo cálculo, guardado como **una sola fila por usuario y fecha de corte** (índice único `usuario_id` + `fecha`). Recalcular la misma fecha actualiza la fila en sitio, no la duplica.
 - **`serieHistorica(User, int $dias = 30, ?Carbon): array`** — un punto por día, cada uno con el promedio de *su propia* ventana de 7 días. Es lo que alimenta el gráfico. Se resuelve con **una sola consulta** (los 30 + 6 días necesarios) y las ventanas se recortan en memoria, en vez de 30 consultas o una función de ventana SQL.
 
-**Columna nueva `registros_diarios.peso_kg`** (migración `add_peso_kg_a_registros_diarios_table`, decimal(5,2) nullable). Sin historial de peso no hay promedio móvil que calcular: `users.peso_kg` es un único valor "actual" que se pisa en cada edición del perfil. No se creó una tabla nueva de pesajes porque `RegistroDiario` ya es el registro único por usuario+fecha. **Nota:** todavía no hay un formulario que rellene esta columna — el peso diario se captura en el Prompt siguiente; hasta entonces la serie de peso viene vacía y la vista lo dice explícitamente ("Sin datos"), sin fallar.
+**Columna nueva `registros_diarios.peso_kg`** (migración `add_peso_kg_a_registros_diarios_table`, decimal(5,2) nullable). Sin historial de peso no hay promedio móvil que calcular: `users.peso_kg` es un único valor "actual" que se pisa en cada edición del perfil. No se creó una tabla nueva de pesajes porque `RegistroDiario` ya es el registro único por usuario+fecha. La columna se rellena vía `RegistroPesoController` — ver sección 4.11.
 
 **Columnas nuevas en `metricas_tendencia`** (migración `add_analitica_a_metricas_tendencia_table`): `promedio_movil_deficit_kcal` decimal(7,2), `indice_consistencia_pct` decimal(5,2), `dias_con_datos` unsignedTinyInteger. `promedio_movil_calorias` conserva su significado original (calorías **consumidas**) y no se recicló para el déficit: son dos cifras distintas y confundirlas falsearía el balance energético.
 
@@ -335,9 +335,32 @@ indice_consistencia_pct = días con RegistroDiario cerrado / 7 * 100
 
 **Nota para tests:** `actingAs($usuario)` fija *esa instancia* como usuario autenticado de las peticiones siguientes, así que tras una acción HTTP que modifique el perfil (confirmar una recomendación, p. ej.) hay que hacer `$usuario->refresh()` antes de seguir; en producción cada petición recarga el usuario de la base de datos. No es un bug de la app.
 
-**Brecha que queda abierta a propósito:** `registros_diarios.peso_kg` sigue sin ningún formulario que la rellene (ver sección 4.7), así que en producción `porcentaje_perdida_semanal` es siempre `null` y `DailyClosureService::generarRecomendaciones()` sigue devolviendo una colección vacía (sección 4.5). Es decir, hoy **ninguna `RecomendacionSistema` se genera sola**: el motor de reglas y su endpoint de confirmación funcionan y están cubiertos, pero les falta la captura del peso diario y el wiring del cierre. Son dos piezas de alcance nuevo, no una inconsistencia entre módulos, y por eso este prompt no las construyó.
+**Brecha cerrada en la sección 4.11:** la captura de peso diario y el wiring de `DailyClosureService::generarRecomendaciones()` con `TrendAnalyticsService`/`RulesEngineService` ya están implementados — ver esa sección.
 
 **Tests:** `tests/Feature/DailyFlowTest.php` cubre el día completo paso a paso (incluido que el cierre cuadra con lo introducido y que con un solo día de historial **no** se genera ninguna recomendación, como exige la sección 6), que un día cerrado queda congelado y su resumen no depende del perfil posterior, y que un ajuste confirmado sí pasa a dimensionar el plan y el cierre. `tests/Unit/NutritionCalculatorServiceTest.php` cubre el objetivo vigente que sustituye al derivado y el que es demasiado pequeño para sus propios macros. `tests/Unit/RulesEngineServiceTest.php` cubre que no se sugiere un ajuste sobre un objetivo inexistente.
+
+## 4.11. Captura de peso diario y wiring del motor de recomendaciones (implementado)
+
+Cierra la brecha que dejaban abiertas las secciones 4.7 y 4.10: hasta ahora nada rellenaba `registros_diarios.peso_kg`, así que `porcentaje_perdida_semanal` era siempre `null` y `DailyClosureService::generarRecomendaciones()` devolvía siempre una colección vacía — el motor de reglas (sección 4.6) y su endpoint de confirmación funcionaban pero nunca se disparaban solos.
+
+- **`RegistroPesoController`** (`app/Http/Controllers/RegistroPesoController.php`), rutas bajo `auth`:
+  - `GET /peso` (`peso.create`) — formulario con el peso ya reportado hoy, si lo hay.
+  - `POST /peso` (`peso.store`) — guarda (o corrige) `peso_kg` del `RegistroDiario` de **hoy** del usuario autenticado; lo crea si no existe, mismo patrón que `IngredienteDisponibleController`/`ActividadFisicaController`.
+- **A propósito no toca `users.peso_kg`** (el peso de perfil que dimensiona el TMB en `NutritionCalculatorService`): ese sigue siendo un dato que el usuario edita explícitamente en `ProfileParametersController`, no algo que un pesaje diario deba desplazar en silencio y que recalculara `calorias_objetivo` sin pasar por una `RecomendacionSistema` confirmada (sección 6).
+- **Permitido en un día cerrado:** `peso_kg` no alimenta ninguna cifra de `DailyClosureService::armarResumen()` (calorías, déficit, proteína), solo la analítica de tendencias, así que registrar el peso no rompe la inmutabilidad del cierre (a diferencia de `ComidaReal`/`ActividadFisica`, sección 4.5).
+- **`RegistroPesoRequest`**: `peso_kg` requerido, numérico, entre 20 y 400 (mismo rango plausible que la columna).
+- **Vista** `resources/views/peso/create.blade.php`; enlace "Registrar peso" añadido a `resources/views/layouts/navigation.blade.php` (menú de escritorio y responsive).
+
+**`TrendAnalyticsService::variacionesSemanalesPesoKg(User, int $semanas = 3, ?Carbon $fechaCorte = null): array<int, float>`** — el insumo que pide `RulesEngineService::detectarEstancamiento()`. Reutiliza el mismo promedio móvil de 7 días de `calcular()`, muestreado cada 7 días hacia atrás en vez de una sola vez, y devuelve las diferencias entre promedios consecutivos (de la más antigua a la más reciente). Si el promedio de alguna semana de la cadena falta (ningún peso apuntado esa semana), la variación que la involucra se omite en vez de compararse contra un dato inexistente — como mucho hay menos variaciones disponibles y `detectarEstancamiento()` no dispara nada, nunca una alerta calculada sobre un hueco.
+
+**`DailyClosureService::generarRecomendaciones()` ya no devuelve una colección vacía a propósito.** Ahora, dentro de la misma transacción de `cerrar()`:
+
+1. Llama a `TrendAnalyticsService::calcular($usuario, $registroDiario->fecha)` (la fecha del propio registro, no "hoy" — así funciona igual desde un cierre en vivo que desde `app:run-daily-closure` sobre el día de ayer). Si `datos_suficientes` es `true` y hay `porcentaje_perdida_semanal`, se lo pasa a `RulesEngineService::generarRecomendacionAjusteCalorico()`.
+2. Llama a `TrendAnalyticsService::variacionesSemanalesPesoKg($usuario, 3, $registroDiario->fecha)`; con al menos 3 variaciones disponibles, se las pasa a `RulesEngineService::detectarEstancamiento()`.
+
+Ambos pasos respetan la sección 6 al no aplicar nada directamente: solo persisten una `RecomendacionSistema` `pendiente` (si el motor de reglas decide que corresponde), que el usuario confirma o rechaza como ya hacía la sección 4.6.
+
+**Tests:** `tests/Unit/TrendAnalyticsServiceTest.php` cubre `variacionesSemanalesPesoKg` con cuatro semanas de peso constante por bloque (verificación manual de las tres diferencias) y con una semana intermedia sin peso (la variación que la involucra se omite, no se calcula sobre `null`). `tests/Unit/DailyClosureServiceTest.php` cubre que cerrar un día con 13 días previos de historial de peso (ventana anterior a 80.5 kg, ventana actual a ~80.29 kg, pérdida ≈0.27% semanal) genera una `RecomendacionSistema` `ajuste_calorico` pendiente con la cifra sugerida esperada. `tests/Feature/RegistroPesoTest.php` cubre acceso protegido por `auth`, creación automática del `RegistroDiario` de hoy, que un segundo pesaje el mismo día corrige el primero en vez de duplicar el registro, que `users.peso_kg` no se toca, la validación de rango, y que un día ya cerrado sigue aceptando el pesaje.
 
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 

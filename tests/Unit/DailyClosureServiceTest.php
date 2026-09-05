@@ -88,7 +88,8 @@ test('closing a day with complete data produces the five expected closure values
     //   2. actividad ajustada 400*0.85 + 200*0.80 = 340 + 160 = 500 kcal
     //   3. deficit = 2112 - 1950 + 500 = 662 kcal
     //   4. proteína 45+60+40 = 145 g de 80*2.0 = 160 g -> 90.625 %
-    //   5. sin recomendaciones (llegan en el Prompt 10)
+    //   5. sin recomendaciones: un solo día de historial no alcanza la ventana
+    //      de 7 días que exige la sección 6
     expect($resumen['calorias_objetivo'])->toEqualWithDelta(2112.0, 0.01)
         ->and($resumen['calorias_consumidas'])->toEqualWithDelta(1950.0, 0.01)
         ->and($resumen['calorias_actividad_ajustada'])->toEqualWithDelta(500.0, 0.01)
@@ -186,6 +187,41 @@ test('reopening a day allows closing it again with recomputed values', function 
         ->and($resumen['deficit_diario'])->toEqualWithDelta(462.0, 0.01)
         ->and($resumen['proteina_consumida_g'])->toEqualWithDelta(160.0, 0.01)
         ->and($resumen['cumplimiento_proteina_pct'])->toEqualWithDelta(100.0, 0.01);
+});
+
+test('closing a day with a full 7-day trend of slow weight loss generates a pending ajuste_calorico recommendation', function () {
+    $usuario = usuarioDeCierre();
+
+    // 13 días previos con peso conocido: ventana anterior (días -13..-7) a 80.5 kg,
+    // ventana actual (días -6..-1, sin contar hoy) a 80.3 kg.
+    foreach (range(13, 7) as $diasAtras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($diasAtras)->toDateString(),
+            'peso_kg' => 80.5,
+        ]);
+    }
+    foreach (range(6, 1) as $diasAtras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($diasAtras)->toDateString(),
+            'peso_kg' => 80.3,
+        ]);
+    }
+
+    // Hoy: 80.2 kg. Promedio de la ventana actual (80.3*6 + 80.2)/7 ≈ 80.2857 vs.
+    // 80.5 de la ventana anterior -> pérdida semanal ≈ 0.266%, por debajo del 0.5%
+    // que exige la sección 6 para sugerir "reducir".
+    $registroDiario = diaCompleto($usuario);
+    $registroDiario->update(['peso_kg' => 80.2]);
+
+    $resumen = app(DailyClosureService::class)->cerrar($registroDiario);
+
+    expect($resumen['recomendaciones'])->toHaveCount(1);
+
+    $recomendacion = $resumen['recomendaciones']->first();
+
+    expect($recomendacion->tipo)->toBe('ajuste_calorico')
+        ->and((float) $recomendacion->calorias_objetivo_sugeridas)->toEqualWithDelta(2112.0 - 150.0, 0.01)
+        ->and($recomendacion->estado)->toBe('pendiente');
 });
 
 test('a day whose meals were never logged closes with zero consumption', function () {

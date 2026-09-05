@@ -21,6 +21,8 @@ class DailyClosureService
 {
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
+        private readonly TrendAnalyticsService $analiticaTendencias,
+        private readonly RulesEngineService $reglas,
     ) {}
 
     /**
@@ -180,19 +182,47 @@ class DailyClosureService
     }
 
     /**
-     * Extension point for the automatic recommendations (Prompt 10).
+     * Traduce los promedios móviles de 7 días de TrendAnalyticsService en las
+     * RecomendacionSistema pendientes de confirmación que decida RulesEngineService
+     * (CLAUDE.md sección 6: nunca un ajuste derivado de un solo día).
      *
-     * It stays empty on purpose: CLAUDE.md section 6 forbids deriving an
-     * adjustment from a single day — recommendations come from the 7-day moving
-     * averages of TrendAnalyticsService, and are always persisted as a pending
-     * RecomendacionSistema that the user has to confirm. When that lands, this
-     * is where the closure hands the day over to it.
+     * Se calcula con la fecha del propio $registroDiario (no "hoy"), para que
+     * este método sea correcto tanto si lo llama un cierre en vivo como si lo
+     * llama app:run-daily-closure sobre el día de ayer.
      *
      * @param  array{calorias_objetivo: float, calorias_consumidas: float, calorias_actividad_ajustada: float, deficit_diario: float, proteina_objetivo_g: float, proteina_consumida_g: float, cumplimiento_proteina_pct: float, recomendaciones: Collection<int, RecomendacionSistema>}  $resumen
      * @return Collection<int, RecomendacionSistema>
      */
     private function generarRecomendaciones(RegistroDiario $registroDiario, array $resumen): Collection
     {
-        return collect();
+        $usuario = $registroDiario->usuario;
+        $recomendaciones = collect();
+
+        $tendencia = $this->analiticaTendencias->calcular($usuario, $registroDiario->fecha);
+
+        // Con menos de una ventana completa de 7 días, la sección 6 prohíbe
+        // sugerir un ajuste: no hay promedio móvil de fiar todavía.
+        if ($tendencia['datos_suficientes'] && $tendencia['porcentaje_perdida_semanal'] !== null) {
+            $ajuste = $this->reglas->generarRecomendacionAjusteCalorico(
+                $registroDiario,
+                $tendencia['porcentaje_perdida_semanal'],
+            );
+
+            if ($ajuste !== null) {
+                $recomendaciones->push($ajuste);
+            }
+        }
+
+        $variaciones = $this->analiticaTendencias->variacionesSemanalesPesoKg($usuario, 3, $registroDiario->fecha);
+
+        if (count($variaciones) >= 3) {
+            $estancamiento = $this->reglas->detectarEstancamiento($registroDiario, $variaciones);
+
+            if ($estancamiento !== null) {
+                $recomendaciones->push($estancamiento);
+            }
+        }
+
+        return $recomendaciones;
     }
 }

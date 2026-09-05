@@ -170,6 +170,51 @@ class TrendAnalyticsService
     }
 
     /**
+     * Variación de peso (kg, con signo) semana a semana, de la más antigua a
+     * la más reciente — el insumo que pide RulesEngineService::detectarEstancamiento().
+     * Cada variación es la diferencia entre dos promedios móviles de 7 días
+     * consecutivos (no window functions, mismo criterio que el resto de la
+     * clase): reutiliza el mismo promedio móvil que ya expone calcular(),
+     * solo que muestreado cada 7 días hacia atrás en vez de una sola vez.
+     *
+     * Si algún promedio de la cadena falta (semana sin ningún peso registrado),
+     * esa variación se omite en vez de comparar contra un dato inexistente —
+     * detectarEstancamiento() solo actúa con al menos 3 variaciones reales, así
+     * que un hueco en el historial produce menos variaciones y, como mucho, no
+     * hay alerta; nunca una alerta calculada sobre un hueco.
+     *
+     * @return array<int, float>
+     */
+    public function variacionesSemanalesPesoKg(User $usuario, int $semanas = 3, ?Carbon $fechaCorte = null): array
+    {
+        $corte = $this->normalizarFecha($fechaCorte);
+        $puntosNecesarios = $semanas + 1;
+
+        $registros = $this->registrosEntre(
+            $usuario,
+            $corte->copy()->subDays(self::DIAS_VENTANA * $puntosNecesarios - 1),
+            $corte,
+        );
+
+        $promedios = [];
+        for ($i = $semanas; $i >= 0; $i--) {
+            $fecha = $corte->copy()->subDays($i * self::DIAS_VENTANA);
+            $promedios[] = $this->promedio($this->ventana($registros, $fecha), 'peso_kg');
+        }
+
+        $variaciones = [];
+        for ($i = 1; $i < count($promedios); $i++) {
+            if ($promedios[$i - 1] === null || $promedios[$i] === null) {
+                continue;
+            }
+
+            $variaciones[] = $promedios[$i] - $promedios[$i - 1];
+        }
+
+        return $variaciones;
+    }
+
+    /**
      * Los RegistroDiario del usuario dentro de un rango de fechas, ambos
      * extremos incluidos. Se usa whereDate y no whereBetween porque el cast
      * `date` persiste la fecha con hora en SQLite y la comparación textual del
