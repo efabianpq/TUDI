@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\DayAlreadyClosedException;
 use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
@@ -34,9 +35,16 @@ class ComidaRealService
      * failure midway never leaves the day's totals out of sync.
      *
      * @param  array{calorias_reales: float, proteina_g: float, grasa_g: float, carbohidratos_g: float, notas: ?string}  $datos
+     *
+     * @throws DayAlreadyClosedException when the day was already closed — a closed
+     *                                   day is frozen until the user reopens it
      */
     public function registrar(PlanComida $planComida, array $datos, ?UploadedFile $imagen = null): ComidaReal
     {
+        if ($planComida->registroDiario->cerrado) {
+            throw DayAlreadyClosedException::alRegistrarComida($planComida->registro_diario_id);
+        }
+
         return DB::transaction(function () use ($planComida, $datos, $imagen) {
             $rutaImagen = $imagen?->store(self::DIRECTORIO_IMAGENES, self::DISCO_IMAGENES);
 

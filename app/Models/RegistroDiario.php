@@ -16,7 +16,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'calorias_consumidas',
     'calorias_actividad_ajustada',
     'deficit_diario',
+    'proteina_objetivo_g',
+    'proteina_consumida_g',
     'cerrado',
+    'cerrado_en',
 ])]
 class RegistroDiario extends Model
 {
@@ -36,7 +39,10 @@ class RegistroDiario extends Model
             'calorias_consumidas' => 'decimal:2',
             'calorias_actividad_ajustada' => 'decimal:2',
             'deficit_diario' => 'decimal:2',
+            'proteina_objetivo_g' => 'decimal:2',
+            'proteina_consumida_g' => 'decimal:2',
             'cerrado' => 'boolean',
+            'cerrado_en' => 'datetime',
         ];
     }
 

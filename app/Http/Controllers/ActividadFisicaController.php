@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\DayAlreadyClosedException;
 use App\Http\Requests\ActividadFisicaRequest;
 use App\Models\RegistroDiario;
 use App\Services\ActivityCorrectionService;
@@ -49,6 +50,13 @@ class ActividadFisicaController extends Controller
                 'usuario_id' => $request->user()->id,
                 'fecha' => now()->toDateString(),
             ]);
+        }
+
+        // A closed day is frozen: a new activity would change the
+        // calorias_actividad_ajustada its closure was computed from.
+        if ($registroDiario->cerrado) {
+            return Redirect::route('cierre.index')
+                ->with('error', DayAlreadyClosedException::alRegistrarActividad($registroDiario->id)->getMessage());
         }
 
         DB::transaction(function () use ($request, $registroDiario) {

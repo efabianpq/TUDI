@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ActividadFisicaController;
+use App\Http\Controllers\CierreDiarioController;
 use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\PlanComidaController;
@@ -38,6 +39,10 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/actividades', [ActividadFisicaController::class, 'create'])->name('actividades.create');
     Route::post('/actividades', [ActividadFisicaController::class, 'store'])->name('actividades.store');
+
+    Route::get('/cierre', [CierreDiarioController::class, 'index'])->name('cierre.index');
+    Route::post('/cierre', [CierreDiarioController::class, 'cerrar'])->name('cierre.cerrar');
+    Route::post('/cierre/{registroDiario}/reabrir', [CierreDiarioController::class, 'reabrir'])->name('cierre.reabrir');
 });
 
 require __DIR__.'/auth.php';

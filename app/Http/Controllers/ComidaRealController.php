@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\DayAlreadyClosedException;
 use App\Http\Requests\ComidaRealRequest;
 use App\Models\PlanComida;
 use App\Services\ComidaRealService;
@@ -22,6 +23,11 @@ class ComidaRealController extends Controller
     public function create(Request $request, PlanComida $planComida): View|RedirectResponse
     {
         abort_unless($planComida->registroDiario->usuario_id === $request->user()->id, 403);
+
+        if ($planComida->registroDiario->cerrado) {
+            return Redirect::route('cierre.index')
+                ->with('error', DayAlreadyClosedException::alRegistrarComida($planComida->registro_diario_id)->getMessage());
+        }
 
         if ($planComida->comidaReal) {
             return Redirect::route('planes.index')
@@ -47,11 +53,15 @@ class ComidaRealController extends Controller
                 ->with('error', __('Esta comida ya tiene una comida real registrada.'));
         }
 
-        $this->comidaRealService->registrar(
-            $planComida,
-            $request->validated(),
-            $request->file('imagen'),
-        );
+        try {
+            $this->comidaRealService->registrar(
+                $planComida,
+                $request->validated(),
+                $request->file('imagen'),
+            );
+        } catch (DayAlreadyClosedException $e) {
+            return Redirect::route('cierre.index')->with('error', $e->getMessage());
+        }
 
         return Redirect::route('planes.index')->with('status', 'comida-real-guardada');
     }

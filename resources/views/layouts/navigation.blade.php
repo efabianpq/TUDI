@@ -27,6 +27,10 @@
                     <x-nav-link :href="route('actividades.create')" :active="request()->routeIs('actividades.*')">
                         {{ __('Actividad física') }}
                     </x-nav-link>
+
+                    <x-nav-link :href="route('cierre.index')" :active="request()->routeIs('cierre.*')">
+                        {{ __('Cierre del día') }}
+                    </x-nav-link>
                 </div>
             </div>
 
@@ -97,6 +101,10 @@
 
             <x-responsive-nav-link :href="route('actividades.create')" :active="request()->routeIs('actividades.*')">
                 {{ __('Actividad física') }}
+            </x-responsive-nav-link>
+
+            <x-responsive-nav-link :href="route('cierre.index')" :active="request()->routeIs('cierre.*')">
+                {{ __('Cierre del día') }}
             </x-responsive-nav-link>
         </div>
 

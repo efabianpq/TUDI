@@ -48,7 +48,7 @@ Migraciones, modelos Eloquent y factories del modelo de datos completo ya existe
 
 - **Nombres de tabla:** el pluralizador de Laravel no acierta con los nombres compuestos en español (p.ej. `RegistroDiario` → `registro_diarios` en vez de `registros_diarios`), así que cada modelo define `protected $table` explícito. Tablas reales: `registros_diarios`, `ingredientes_disponibles`, `planes_comida`, `comidas_reales`, `actividades_fisicas`, `metricas_tendencia`, `recomendaciones_sistema`.
 - **`users` extendida** (migración `add_perfil_nutricional_a_users_table`): añade `peso_kg` decimal(5,2), `estatura_m` decimal(3,2), `edad` unsignedTinyInteger, `sexo` enum(masculino,femenino), `nivel_actividad` decimal(4,3), `tipo_deficit` enum(porcentaje,fijo), `valor_deficit` decimal(6,2), `proteina_factor` decimal(3,2), `grasa_factor` decimal(3,2), `calorias_objetivo` decimal(7,2) — todas nullable porque el perfil se completa después del registro.
-- **`registros_diarios`**: `usuario_id` (FK cascade), `fecha` (date, único junto a `usuario_id`), `calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario` (todas decimal nullable, se rellenan en el cierre diario), `cerrado` (boolean).
+- **`registros_diarios`**: `usuario_id` (FK cascade), `fecha` (date, único junto a `usuario_id`), `calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, `proteina_objetivo_g`, `proteina_consumida_g` (todas decimal nullable, se rellenan en el cierre diario), `cerrado` (boolean) + `cerrado_en` (dateTime nullable) — ver sección 4.5.
 - **`ingredientes_disponibles`**: `registro_diario_id` (FK cascade) — son entradas ad-hoc por registro diario, no un catálogo maestro compartido; no hay caso de `restrict` en este modelo de datos porque no existen tablas de referencia compartidas en el MVP.
 - **`planes_comida`**: `registro_diario_id` (FK cascade), `tipo_comida` enum(desayuno,almuerzo,cena,snack), macros estimados.
 - **`comidas_reales`**: `plan_comida_id` (FK **unique** + cascade, implementa la relación 1—1), macros reales, `consumido_en`, `notas`.
@@ -169,6 +169,47 @@ La comparación de `tipo` contra la tabla es case-insensitive (`mb_strtolower`).
 - **Vista** `resources/views/actividades/create.blade.php`: formulario simple (sin filas dinámicas, una actividad a la vez) y listado de "Actividades de hoy" con calorías del dispositivo, factor aplicado y calorías ajustadas. Enlace "Actividad física" añadido a `resources/views/layouts/navigation.blade.php`.
 
 **Tests:** `tests/Unit/ActivityCorrectionServiceTest.php` cubre el factor de un tipo conocido, el fallback al factor por defecto para un tipo no listado, insensibilidad a mayúsculas, y que un factor personalizado fuera de rango lanza excepción (no se normaliza) mientras uno dentro de rango sí sobreescribe la tabla. `tests/Feature/ActividadFisicaTest.php` cubre acceso protegido por `auth`, que registrar una actividad aplica el factor correcto y persiste `pasos`/`fuente`, creación automática del `RegistroDiario` de hoy, que `calorias_actividad_ajustada` refleja la suma correcta al registrar varias actividades el mismo día, y validación de `duracion_min`/`fuente` inválidos.
+
+## 4.5. Cierre diario (implementado)
+
+`app/Services/DailyClosureService.php` calcula, persiste y congela el cierre de un día. No reimplementa ninguna fórmula: el objetivo calórico y la proteína objetivo salen de `NutritionCalculatorService::calculatePlan()` y el déficit de `calculateDailyDeficit()` (sección 5).
+
+**Métodos públicos:**
+
+- **`resumen(RegistroDiario): array`** — las cinco cifras del cierre, listas para la vista. Si el día está **abierto** se calculan en vivo (vista previa de lo que produciría cerrarlo); si está **cerrado** se leen del snapshot persistido, para que un cambio posterior de perfil no reescriba la historia. Claves: `calorias_objetivo`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, `proteina_objetivo_g`, `proteina_consumida_g`, `cumplimiento_proteina_pct`, `recomendaciones`.
+- **`cerrar(RegistroDiario): array`** — calcula, persiste y marca el día como cerrado dentro de una transacción. Lanza `DayAlreadyClosedException` si el día ya estaba cerrado (no es idempotente a propósito: ver abajo). Devuelve el resumen ya persistido.
+- **`reabrir(RegistroDiario): void`** — acción explícita del usuario; deja el día abierto de nuevo. No-op si ya estaba abierto.
+
+Las calorías consumidas y la proteína consumida se recalculan siempre desde las `ComidaReal` del día, y el gasto por actividad desde las `ActividadFisica` — no se confía en los acumuladores que mantienen `ComidaRealService` / `ActividadFisicaController`, para que el cierre sea autoritativo aunque esos totales quedaran desfasados.
+
+**Punto de extensión para el Prompt 10:** el método privado `generarRecomendaciones(RegistroDiario, array $resumen)` se invoca dentro de la transacción del cierre y hoy devuelve una colección vacía a propósito — la sección 6 prohíbe derivar un ajuste de un solo día; las recomendaciones vendrán de los promedios móviles de 7 días de `TrendAnalyticsService` y siempre como `RecomendacionSistema` pendiente de confirmación. `resumen()` ya expone las `RecomendacionSistema` del día para que la vista las muestre cuando existan.
+
+### Qué significa "cerrado" y cómo se reabre (decisión documentada)
+
+- **No se añadió una columna `estado_cierre`.** El estado del cierre es la columna `cerrado` (boolean, ya existía) más `cerrado_en` (dateTime nullable, nueva): dos valores para un estado binario con marca de tiempo, en vez de un enum redundante con el boolean.
+- **Columnas nuevas** (migración `add_cierre_a_registros_diarios_table`): `proteina_objetivo_g` decimal(6,2), `proteina_consumida_g` decimal(6,2), `cerrado_en` dateTime — todas nullable. El resto de las cifras del cierre usa las columnas que ya existían (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`).
+- **Cumplimiento de macros = proteína.** Se persiste solo el par objetivo/real de proteína (es la métrica que pide el cierre); `cumplimiento_proteina_pct` se deriva de esas dos columnas y no se persiste. Grasa y carbohidratos no se incluyen en el cierre para no persistir un snapshot parcial que después habría que mantener sincronizado.
+- **Un día cerrado es inmutable.** `ComidaRealService::registrar()` lanza `DayAlreadyClosedException` si el `RegistroDiario` está cerrado (`ComidaRealController` la traduce a redirect con `error`, tanto en el formulario como en el POST), y `ActividadFisicaController@store` rechaza igual una actividad nueva sobre un día cerrado — ambas cambiarían los totales de los que se calculó el cierre. Reportar ingredientes y regenerar el plan **no** se bloquean: no alteran ninguna cifra del cierre ya persistida.
+- **Sí se permite reabrir, pero solo de forma explícita** (`POST /cierre/{registroDiario}/reabrir`). Un usuario que olvidó registrar la cena no debe perder el día entero, y el MVP no tiene otra vía para corregirlo. Reabrir deja las cifras del cierre anterior visibles hasta que se vuelva a cerrar, momento en el que **se recalculan todas desde cero** (no se acumula sobre el cierre previo).
+- **Cerrar un día ya cerrado falla en vez de ser idempotente.** Un segundo cierre silencioso escondería que el usuario cree estar cerrando un día que ya estaba cerrado; se prefiere el error explícito, y el camino correcto (reabrir → cerrar) queda a un clic.
+
+### Endpoint y vista
+
+`CierreDiarioController` (`app/Http/Controllers/CierreDiarioController.php`), rutas bajo `auth`:
+
+- `GET /cierre` (`cierre.index`) — resumen del día de hoy (previo si está abierto, definitivo si está cerrado) y el botón "Cerrar mi día" / "Reabrir mi día".
+- `POST /cierre` (`cierre.cerrar`) — cierra el `RegistroDiario` de hoy del usuario autenticado.
+- `POST /cierre/{registroDiario}/reabrir` (`cierre.reabrir`) — 403 si el registro no pertenece al usuario autenticado.
+
+Sin Form Request: ninguna de las tres acciones recibe entrada del usuario (el día es "hoy" y los parámetros salen del perfil). Ningún fallo de dominio produce un 500 — mismo patrón que `PlanComidaController`: si faltan parámetros nutricionales o el cálculo lanza `NegativeCarbohydrateException`/`InvalidNutritionParameterException` se redirige a `profile.parametros.edit` con `error`; si no hay `RegistroDiario` de hoy o el día ya está cerrado, a `cierre.index` con `error`.
+
+**Vista** `resources/views/cierre/index.blade.php`: los cinco puntos del cierre (objetivo vs. consumidas, gasto por actividad ajustado, déficit estimado, cumplimiento de proteína) más el bloque de "Recomendaciones", vacío hasta el Prompt 10. Enlace "Cierre del día" añadido a `resources/views/layouts/navigation.blade.php`.
+
+**Pendiente:** `app/Console/Commands/RunDailyClosure.php` (cierre automático programado, sección 3) todavía no existe — por ahora el cierre es solo manual.
+
+**`RegistroDiarioFactory`:** su definición por defecto ahora produce un día **abierto** con las columnas del cierre en `null` (antes rellenaba cifras aleatorias y `cerrado` aleatorio, lo que con la nueva regla de inmutabilidad hacía fallar de forma intermitente a los tests que escriben sobre el día). Para un día ya cerrado hay un estado explícito: `RegistroDiario::factory()->cerrado()`.
+
+**Tests:** `tests/Unit/DailyClosureServiceTest.php` (usa `TestCase` + `RefreshDatabase` explícitos, como el test del generador de planes) cubre el cierre de un día completo contra un cálculo manual verificado paso a paso en comentarios (2112 kcal objetivo / 1950 consumidas / 500 de actividad / 662 de déficit / 90.625% de proteína), que cerrar dos veces lanza excepción sin duplicar ni alterar nada, que el resumen de un día cerrado es el snapshot congelado aunque cambie el perfil, que reabrir permite volver a cerrar recalculando, y un día sin comidas ni actividad. `tests/Feature/CierreDiarioTest.php` cubre el flujo HTTP: acceso protegido por `auth`, cierre exitoso con las cinco cifras visibles en la vista, segundo cierre rechazado, día cerrado que rechaza `ComidaReal` (formulario y POST) y `ActividadFisica`, reapertura explícita que vuelve a admitir una `ComidaReal`, 403 al reabrir el día de otro usuario, perfil incompleto, y que el resumen de un día abierto es solo una vista previa que no lo cierra.
 
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
