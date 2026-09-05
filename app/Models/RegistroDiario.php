@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'usuario_id',
     'fecha',
+    'peso_kg',
     'calorias_objetivo_dia',
     'calorias_consumidas',
     'calorias_actividad_ajustada',
@@ -35,6 +36,7 @@ class RegistroDiario extends Model
     {
         return [
             'fecha' => 'date',
+            'peso_kg' => 'decimal:2',
             'calorias_objetivo_dia' => 'decimal:2',
             'calorias_consumidas' => 'decimal:2',
             'calorias_actividad_ajustada' => 'decimal:2',

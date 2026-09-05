@@ -21,9 +21,13 @@ class RulesEngineService
 
     public const TIPO_ALERTA_ESTANCAMIENTO = 'alerta_estancamiento';
 
-    private const UMBRAL_PERDIDA_LENTA_PCT = 0.5;
+    /**
+     * Umbrales de la sección 6, públicos para que TrendAnalyticsService clasifique
+     * la tendencia con los mismos números y no los duplique.
+     */
+    public const UMBRAL_PERDIDA_LENTA_PCT = 0.5;
 
-    private const UMBRAL_PERDIDA_RAPIDA_PCT = 1.0;
+    public const UMBRAL_PERDIDA_RAPIDA_PCT = 1.0;
 
     /**
      * Punto medio del rango 100–200 kcal que exige la sección 6. Un solo valor

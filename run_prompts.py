@@ -82,7 +82,10 @@ def run_claude(prompt_text: str, model: str, effort: str, settings_path: pathlib
     env = os.environ.copy()
     env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
  
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    # encoding/errors explícitos: en Windows, subprocess.run() decodifica los pipes con el
+    # codepage local (cp1252) por defecto, y la salida de `claude` viene en UTF-8 — un solo
+    # byte fuera de rango revienta la lectura del pipe entero y deja result.stdout en None.
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
  
     (log_dir / f"prompt-{index:02d}-stdout.json").write_text(result.stdout, encoding="utf-8")
     (log_dir / f"prompt-{index:02d}-stderr.log").write_text(result.stderr, encoding="utf-8")

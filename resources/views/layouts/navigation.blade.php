@@ -31,6 +31,10 @@
                     <x-nav-link :href="route('cierre.index')" :active="request()->routeIs('cierre.*')">
                         {{ __('Cierre del día') }}
                     </x-nav-link>
+
+                    <x-nav-link :href="route('progreso.index')" :active="request()->routeIs('progreso.*')">
+                        {{ __('Mi progreso') }}
+                    </x-nav-link>
                 </div>
             </div>
 
@@ -105,6 +109,10 @@
 
             <x-responsive-nav-link :href="route('cierre.index')" :active="request()->routeIs('cierre.*')">
                 {{ __('Cierre del día') }}
+            </x-responsive-nav-link>
+
+            <x-responsive-nav-link :href="route('progreso.index')" :active="request()->routeIs('progreso.*')">
+                {{ __('Mi progreso') }}
             </x-responsive-nav-link>
         </div>
 

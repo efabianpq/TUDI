@@ -14,8 +14,8 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 
 
 - **Backend:** Laravel (PHP 8.x), monolito — sin API REST separada en el MVP.
-- **Frontend:** Blade (server-rendered) + Chart.js para gráficos del dashboard. Sin SPA, sin build de frontend pesado.
-- **Base de datos:** MySQL 8.x / MariaDB 10.6+.
+- **Frontend:** Blade (server-rendered) + Chart.js para gráficos del dashboard. Sin SPA, sin build de frontend pesado. Chart.js se carga **desde CDN** (`cdn.jsdelivr.net`) en la vista que lo necesita, empujado al stack `scripts` que declara `resources/views/layouts/app.blade.php`; no está en `package.json`. Así no hace falta `npm run build` en el hosting para que el gráfico funcione, y ninguna página que no dibuje gráficos carga la librería.
+- **Base de datos:** MySQL 8.x / MariaDB 10.6+. Versión mínima asumida: **MySQL 5.7 / MariaDB 10.1** — ver sección 4.7, ninguna consulta usa funciones de ventana ni CTEs. El entorno de desarrollo es MySQL 8.0.30 (verificado con `php artisan db:show`) y la suite de tests corre sobre SQLite en memoria.
 - **Tareas programadas:** Laravel Task Scheduling (`schedule:run`) vía cron de Hostinger. No usar Redis ni colas externas en el MVP.
 - **Almacenamiento de imágenes:** disco local vía `Storage` facade (`storage/app/public`), con `storage:link`. No hardcodear rutas — todo a través del facade para poder migrar a S3 sin tocar código.
 - **Testing:** Pest (preferido) sobre PHPUnit.
@@ -29,7 +29,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Nutrición | `app/Models/PlanComida.php`, `app/Models/ComidaReal.php`, `app/Services/NutritionCalculatorService.php`, `app/Services/MealPlanGeneratorService.php` |
 | Actividad física | `app/Models/ActividadFisica.php`, `app/Services/ActivityCorrectionService.php` |
 | Cierre diario | `app/Services/DailyClosureService.php`, `app/Console/Commands/RunDailyClosure.php` |
-| Analítica | `app/Models/MetricaTendencia.php`, `app/Services/TrendAnalyticsService.php` (pendiente), `app/Console/Commands/CalculateTrends.php` (pendiente) |
+| Analítica | `app/Models/MetricaTendencia.php`, `app/Services/TrendAnalyticsService.php`, `app/Http/Controllers/ProgresoController.php`, `app/Console/Commands/CalculateTrends.php` (pendiente) |
 | Motor de recomendaciones | `app/Services/RulesEngineService.php`, `app/Http/Controllers/RecomendacionSistemaController.php` |
 | Motor de IA/reglas | `app/Services/AI/NutritionAiProviderInterface.php` + implementación concreta |
 
@@ -49,12 +49,12 @@ Migraciones, modelos Eloquent y factories del modelo de datos completo ya existe
 
 - **Nombres de tabla:** el pluralizador de Laravel no acierta con los nombres compuestos en español (p.ej. `RegistroDiario` → `registro_diarios` en vez de `registros_diarios`), así que cada modelo define `protected $table` explícito. Tablas reales: `registros_diarios`, `ingredientes_disponibles`, `planes_comida`, `comidas_reales`, `actividades_fisicas`, `metricas_tendencia`, `recomendaciones_sistema`.
 - **`users` extendida** (migración `add_perfil_nutricional_a_users_table`): añade `peso_kg` decimal(5,2), `estatura_m` decimal(3,2), `edad` unsignedTinyInteger, `sexo` enum(masculino,femenino), `nivel_actividad` decimal(4,3), `tipo_deficit` enum(porcentaje,fijo), `valor_deficit` decimal(6,2), `proteina_factor` decimal(3,2), `grasa_factor` decimal(3,2), `calorias_objetivo` decimal(7,2) — todas nullable porque el perfil se completa después del registro.
-- **`registros_diarios`**: `usuario_id` (FK cascade), `fecha` (date, único junto a `usuario_id`), `calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, `proteina_objetivo_g`, `proteina_consumida_g` (todas decimal nullable, se rellenan en el cierre diario), `cerrado` (boolean) + `cerrado_en` (dateTime nullable) — ver sección 4.5.
+- **`registros_diarios`**: `usuario_id` (FK cascade), `fecha` (date, único junto a `usuario_id`), `peso_kg` (decimal(5,2) nullable, el peso de *ese* día — ver sección 4.7), `calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, `proteina_objetivo_g`, `proteina_consumida_g` (todas decimal nullable, se rellenan en el cierre diario), `cerrado` (boolean) + `cerrado_en` (dateTime nullable) — ver sección 4.5.
 - **`ingredientes_disponibles`**: `registro_diario_id` (FK cascade) — son entradas ad-hoc por registro diario, no un catálogo maestro compartido; no hay caso de `restrict` en este modelo de datos porque no existen tablas de referencia compartidas en el MVP.
 - **`planes_comida`**: `registro_diario_id` (FK cascade), `tipo_comida` enum(desayuno,almuerzo,cena,snack), macros estimados.
 - **`comidas_reales`**: `plan_comida_id` (FK **unique** + cascade, implementa la relación 1—1), macros reales, `consumido_en`, `notas`.
 - **`actividades_fisicas`**: `registro_diario_id` (FK cascade), `calorias_dispositivo`, `factor_correccion` (default 0.85, rango 0.8–0.9 según sección 5), `calorias_ajustadas` (= dispositivo × factor).
-- **`metricas_tendencia`**: `usuario_id` (FK cascade), `fecha` (único junto a `usuario_id`), promedios móviles y `tendencia` enum.
+- **`metricas_tendencia`**: `usuario_id` (FK cascade), `fecha` (único junto a `usuario_id`), promedios móviles (`promedio_movil_peso_kg`, `promedio_movil_calorias`, `promedio_movil_deficit_kcal`), `indice_consistencia_pct`, `dias_con_datos`, `porcentaje_perdida_semanal` y `tendencia` enum — ver sección 4.7.
 - **`recomendaciones_sistema`**: `registro_diario_id` (FK cascade), `estado` enum(pendiente,confirmada,rechazada) default pendiente — refleja la regla de la sección 6 (nunca se aplica un ajuste sin confirmación).
 - **`onDelete`:** cascade en todas las FKs — todas las entidades hijas son datos propios del usuario/registro sin sentido fuera de su padre; no hay entidades de catálogo compartido que requieran `restrict` en este MVP.
 - **Tests:** `tests/Feature/ModeloDatosTest.php` cubre cada relación y dos casos de cascade delete. Se activó `RefreshDatabase` en `tests/Pest.php` (estaba comentado); `phpunit.xml` ya usa sqlite en memoria para testing.
@@ -216,7 +216,7 @@ Sin Form Request: ninguna de las tres acciones recibe entrada del usuario (el d�
 
 `app/Services/RulesEngineService.php` es el único punto donde se decide si corresponde sugerir un ajuste de `calorias_objetivo` o alertar de un estancamiento, y el único camino por el que una `RecomendacionSistema` confirmada llega a modificar de verdad `calorias_objetivo` del usuario — nunca de forma automática (sección 6).
 
-**No reimplementa el pipeline de tendencias.** `TrendAnalyticsService`/`CalculateTrends` (fila "Analítica" de la sección 3) todavía no existen — nada calcula hoy el promedio móvil de 7 días real a partir de un historial de peso (de hecho no hay ninguna tabla que registre el peso día a día; `users.peso_kg` es un único valor "actual"). `RulesEngineService` recibe el `porcentaje_perdida_semanal` (o las variaciones de peso semana a semana, para estancamiento) **ya calculado** como parámetro — cuando Prompt 11 implemente el pipeline real, este servicio es el que debe invocar con esos números; no antes.
+**No reimplementa el pipeline de tendencias.** `RulesEngineService` recibe el `porcentaje_perdida_semanal` (o las variaciones de peso semana a semana, para estancamiento) **ya calculado** como parámetro; quien lo calcula es `TrendAnalyticsService` (sección 4.7), que expone exactamente esa cifra en `calcular()['porcentaje_perdida_semanal']`. Sus umbrales `UMBRAL_PERDIDA_LENTA_PCT` (0.5) y `UMBRAL_PERDIDA_RAPIDA_PCT` (1.0) son públicos precisamente para que `TrendAnalyticsService` clasifique la tendencia con los mismos números en vez de duplicarlos.
 
 - **`evaluarTendenciaPeso(float $porcentajePerdidaSemanal): ?string`** — aplica literalmente la regla de la sección 6: `< 0.5` → `'reducir'`, `> 1.0` → `'aumentar'`, cualquier otro caso → `null`. Público para poder testear la regla de umbral aislada de la persistencia.
 - **`generarRecomendacionAjusteCalorico(RegistroDiario, float $porcentajePerdidaSemanal): ?RecomendacionSistema`** — si `evaluarTendenciaPeso` no devuelve dirección, no persiste nada y retorna `null`. Si hay dirección, persiste una `RecomendacionSistema` (`tipo` = `ajuste_calorico`, `estado` = `pendiente`) con `calorias_objetivo_sugeridas` y una `justificacion` en texto legible. **No toca `calorias_objetivo` del usuario en este paso** — eso solo ocurre al confirmar.
@@ -234,9 +234,62 @@ Sin Form Request: ninguna de las tres acciones recibe entrada del usuario (el d�
 
 403 si `recomendacion->registroDiario->usuario_id` no es el usuario autenticado (misma verificación transitiva que usa `RecomendacionSistema`, que no tiene `usuario_id` propio — sección 4). `RecomendacionYaProcesadaException` se traduce a redirect a `cierre.index` con `error`, igual patrón que `CierreDiarioController`. La vista `resources/views/cierre/index.blade.php` (donde ya se listaban las recomendaciones del día) ahora muestra botones "Confirmar"/"Rechazar" para las que están `pendiente`.
 
-**Pendiente:** wiring real dentro de `DailyClosureService::generarRecomendaciones()` (el punto de extensión que menciona la sección 4.5) — hoy sigue devolviendo una colección vacía a propósito, porque no existe todavía una fuente real del promedio móvil de 7 días para invocar este motor desde el cierre. Cuando `TrendAnalyticsService`/`CalculateTrends` existan, ese es el lugar donde deben llamar a `RulesEngineService::generarRecomendacionAjusteCalorico()`/`detectarEstancamiento()`.
+**Pendiente:** wiring real dentro de `DailyClosureService::generarRecomendaciones()` (el punto de extensión que menciona la sección 4.5) — hoy sigue devolviendo una colección vacía a propósito. La fuente del promedio móvil ya existe (`TrendAnalyticsService`), así que lo único que falta es que ese método llame a `TrendAnalyticsService::calcular()` y pase `porcentaje_perdida_semanal` a `RulesEngineService::generarRecomendacionAjusteCalorico()`, saltándoselo cuando `datos_suficientes` sea `false` (la sección 6 prohíbe ajustar con menos de una ventana completa). Sigue faltando también la serie de variaciones semanales que pide `detectarEstancamiento()`.
 
 **Tests:** `tests/Unit/RulesEngineServiceTest.php` (usa `TestCase` + `RefreshDatabase` explícitos, mismo patrón que los demás Services que tocan Eloquent) cubre: pérdida simulada <0.5% semanal → recomienda reducir; >1% → recomienda aumentar; entre 0.5% y 1% → no genera nada; confirmar sí actualiza `calorias_objetivo` del usuario; rechazar no lo modifica; confirmar dos veces lanza excepción; estancamiento detectado con 3 semanas de variación mínima; no detectado si alguna semana reciente varió más del umbral; no detectado con menos de 3 semanas de datos. `tests/Feature/RecomendacionSistemaTest.php` cubre el flujo HTTP: acceso protegido por `auth`, 403 al confirmar la recomendación de otro usuario, confirmar actualiza `calorias_objetivo` vía HTTP, rechazar no lo modifica, y que confirmar una ya rechazada falla sin efectos.
+
+## 4.7. Analítica de tendencias y "Mi progreso" (implementado)
+
+`app/Services/TrendAnalyticsService.php` es la fuente de los promedios móviles que la sección 6 exige para ajustar el objetivo calórico (nunca un día aislado). Calcula y persiste; no decide nada — quien traduce esas cifras en una `RecomendacionSistema` pendiente de confirmación es `RulesEngineService` (sección 4.6).
+
+**Métodos públicos:**
+
+- **`calcular(User, ?Carbon $fechaCorte = null): array`** — las métricas de la ventana de 7 días que termina en la fecha de corte (hoy por defecto). Claves: `fecha_corte`, `promedio_movil_peso_kg`, `promedio_movil_calorias`, `promedio_movil_deficit_kcal`, `indice_consistencia_pct`, `dias_con_datos`, `dias_cerrados`, `datos_suficientes`, `porcentaje_perdida_semanal`, `tendencia`.
+- **`calcularYPersistir(User, ?Carbon): MetricaTendencia`** — el mismo cálculo, guardado como **una sola fila por usuario y fecha de corte** (índice único `usuario_id` + `fecha`). Recalcular la misma fecha actualiza la fila en sitio, no la duplica.
+- **`serieHistorica(User, int $dias = 30, ?Carbon): array`** — un punto por día, cada uno con el promedio de *su propia* ventana de 7 días. Es lo que alimenta el gráfico. Se resuelve con **una sola consulta** (los 30 + 6 días necesarios) y las ventanas se recortan en memoria, en vez de 30 consultas o una función de ventana SQL.
+
+**Columna nueva `registros_diarios.peso_kg`** (migración `add_peso_kg_a_registros_diarios_table`, decimal(5,2) nullable). Sin historial de peso no hay promedio móvil que calcular: `users.peso_kg` es un único valor "actual" que se pisa en cada edición del perfil. No se creó una tabla nueva de pesajes porque `RegistroDiario` ya es el registro único por usuario+fecha. **Nota:** todavía no hay un formulario que rellene esta columna — el peso diario se captura en el Prompt siguiente; hasta entonces la serie de peso viene vacía y la vista lo dice explícitamente ("Sin datos"), sin fallar.
+
+**Columnas nuevas en `metricas_tendencia`** (migración `add_analitica_a_metricas_tendencia_table`): `promedio_movil_deficit_kcal` decimal(7,2), `indice_consistencia_pct` decimal(5,2), `dias_con_datos` unsignedTinyInteger. `promedio_movil_calorias` conserva su significado original (calorías **consumidas**) y no se recicló para el déficit: son dos cifras distintas y confundirlas falsearía el balance energético.
+
+### Versión de motor asumida y por qué el promedio se calcula en PHP
+
+La sección 10 exige verificar la versión real antes de usar `AVG() OVER (...)`. Verificado con `php artisan db:show`: **desarrollo es MySQL 8.0.30**, que sí soporta funciones de ventana. Aun así el promedio se calcula **en PHP**, porque:
+
+1. el objetivo de despliegue es hosting compartido de Hostinger, cuya versión no está garantizada ni bajo nuestro control, y
+2. la suite corre sobre SQLite en memoria (`phpunit.xml`).
+
+La ventana son 7 filas por usuario: promediarlas en PHP no tiene coste apreciable y el mismo código funciona en los tres motores. **Versión mínima asumida en todo el proyecto: MySQL 5.7 / MariaDB 10.1** (ninguna consulta usa funciones de ventana ni CTEs). Si algún día se fija la versión del servidor, `TrendAnalyticsService` es el único sitio que habría que tocar; la razón está documentada también en el docblock de la clase.
+
+### Definición exacta del índice de consistencia
+
+```
+indice_consistencia_pct = días con RegistroDiario cerrado / 7 * 100
+```
+
+- **El divisor es siempre 7**, los días naturales de la ventana (incluida la fecha de corte), nunca el número de días con registro: quien solo cerró 2 de los últimos 7 días tiene 28.6%, no 100%.
+- **Se cuenta el cierre, no la existencia del `RegistroDiario`**: un registro se crea con solo reportar un ingrediente, mientras que cerrarlo implica haber registrado comidas y actividad — es la señal real de adherencia.
+- Siempre es un número: cero días cerrados de siete es `0.0`, no "desconocido".
+
+### Datos insuficientes: se marcan, no se lanzan
+
+`calcular()` nunca lanza por falta de historial. Con menos de 7 días devuelve `datos_suficientes => false` y promedia lo que haya; sin ni un dato, los promedios son `null`. Los días sin valor en una columna **se ignoran, no cuentan como cero** ni en el numerador ni en el divisor (un día sin pesarse no hunde el promedio a la mitad). `promedio_movil_deficit_kcal` sale de `deficit_diario`, que solo se rellena al cerrar el día: en la práctica promedia únicamente días cerrados, y la vista lo advierte.
+
+`porcentaje_perdida_semanal` compara el promedio móvil actual contra el de la ventana que terminó 7 días antes (positivo = adelgazó); es `null` si falta cualquiera de los dos. `tendencia` traduce esa cifra al enum de la tabla usando los umbrales públicos de `RulesEngineService` (0.5 / 1.0) más un margen propio de ±0.1% (`UMBRAL_ESTABLE_PCT`, ~0.08 kg para 80 kg: el ruido de una báscula doméstica) por debajo del cual la tendencia es `estable`.
+
+### Endpoint y vista
+
+`ProgresoController` (`app/Http/Controllers/ProgresoController.php`), ruta bajo `auth`:
+
+- `GET /progreso` (`progreso.index`) — "Mi progreso". Sin Form Request: no recibe ninguna entrada (los días del gráfico son una constante privada del controlador, `DIAS_GRAFICO = 30`, no un query string).
+
+**El GET persiste el snapshot del día**, llamando a `calcularYPersistir()`. Es una escritura idempotente (una única fila por usuario+fecha, actualizada en sitio), no una acción del usuario: mientras no exista el comando programado `CalculateTrends`, esta es la única vía por la que la serie llega a `metricas_tendencia`. Cuando ese comando exista, pasará a ser el escritor principal y aquí bastará con leer.
+
+**Vista** `resources/views/progreso/index.blade.php`: tres tarjetas (promedio móvil de peso + % semanal y tendencia, déficit promedio, índice de consistencia con el "N de 7 días cerrados") y un gráfico de línea de Chart.js con la evolución del promedio móvil de peso. La serie viaja al navegador en `data-serie` del `<canvas>` (JSON), no en una variable global. Si el CDN no carga, la página sigue siendo útil: las tres cifras son server-rendered y el script se autolimita (`typeof Chart === 'undefined'` → return). Con menos de 7 días de historial se muestra un aviso ámbar en vez de ocultar las cifras. Enlace "Mi progreso" añadido a `resources/views/layouts/navigation.blade.php`, y `@stack('scripts')` a `resources/views/layouts/app.blade.php` (no existía).
+
+**Pendiente:** `app/Console/Commands/CalculateTrends.php` — el cálculo programado nocturno para todos los usuarios. Debe limitarse a llamar a `calcularYPersistir()` por usuario; toda la lógica ya está en el servicio.
+
+**Tests:** `tests/Unit/TrendAnalyticsServiceTest.php` (usa `TestCase` + `RefreshDatabase` explícitos, mismo patrón que los demás Services que tocan Eloquent; fecha de corte fija `2026-03-15` para no depender del día de ejecución) cubre: el promedio móvil de peso sobre 10 días de pesos conocidos contra el cálculo manual escrito en el propio test (los 3 días más antiguos quedan fuera de la ventana y se verifica que no la mueven), el promedio móvil de déficit, el índice de consistencia con 4/7, 0/7 y 7/7 días cerrados (y que un día cerrado fuera de la ventana no lo infla), historial de 3 días → `datos_suficientes` false sin excepción, usuario sin ningún registro, registros sin peso apuntado, días sin peso ignorados en vez de contados como cero, las cuatro clasificaciones de `tendencia`, aislamiento entre usuarios, persistencia de una única fila y recálculo que actualiza en sitio, y la serie histórica (fechas correctas, ventana de cada punto, y huecos `null` en vez de excepción). `tests/Feature/ProgresoTest.php` cubre el flujo HTTP: acceso protegido por `auth`, las tres cifras visibles en la vista, la consistencia con días sin cerrar, el snapshot persistido al consultar (y no duplicado al recargar), el aviso de datos insuficientes, usuario recién registrado sin datos, la serie en el `<canvas>`, y que no se mezcla el progreso de otro usuario.
 
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
@@ -324,7 +377,7 @@ calorias_actividad_ajustada = calorias_dispositivo * factor_correccion   [factor
 ## 10. Despliegue (Hostinger)
 
 - Un solo cron job: `* * * * * php /home/USER/domains/DOMINIO/public_html/artisan schedule:run >> /dev/null 2>&1`.
-- Verificar la versión real de MySQL/MariaDB del plan contratado antes de usar `AVG() OVER (...)` en `TrendAnalyticsService`; si no está disponible, calcular el promedio móvil en PHP sobre los últimos 7 `RegistroDiario`.
+- **Resuelto:** `TrendAnalyticsService` calcula el promedio móvil en PHP sobre los últimos 7 `RegistroDiario`, así que no hace falta verificar la versión del plan contratado — no se usa `AVG() OVER (...)` en ningún sitio. Versión mínima asumida: MySQL 5.7 / MariaDB 10.1 (sección 4.7).
 - Variables sensibles (API key del proveedor de IA, credenciales de MySQL) solo en `.env`, nunca hardcodeadas ni commiteadas.
 - Antes de cada despliegue: `composer install --no-dev`, `php artisan migrate --force`, `php artisan config:cache`.
 

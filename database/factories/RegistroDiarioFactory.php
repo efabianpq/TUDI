@@ -23,6 +23,7 @@ class RegistroDiarioFactory extends Factory
         return [
             'usuario_id' => User::factory(),
             'fecha' => fake()->unique()->dateTimeBetween('-3 months', 'now')->format('Y-m-d'),
+            'peso_kg' => null,
             'calorias_objetivo_dia' => null,
             'calorias_consumidas' => null,
             'calorias_actividad_ajustada' => null,
