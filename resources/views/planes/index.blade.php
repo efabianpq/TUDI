@@ -19,6 +19,12 @@
                 </div>
             @endif
 
+            @if (session('status') === 'comida-real-guardada')
+                <div class="p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+                    {{ __('Tu comida real se registró correctamente.') }}
+                </div>
+            @endif
+
             <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
                 <div class="flex items-center justify-between gap-4">
                     <div>
@@ -70,6 +76,28 @@
                                 @endforeach
                             </ul>
                         @endif
+
+                        <div class="mt-4 pt-4 border-t">
+                            @if ($plan->comidaReal)
+                                <p class="text-sm text-gray-700">
+                                    {{ __('Comida real registrada:') }}
+                                    {{ $plan->comidaReal->calorias_reales }} kcal ·
+                                    P {{ $plan->comidaReal->proteina_g }} g ·
+                                    G {{ $plan->comidaReal->grasa_g }} g ·
+                                    C {{ $plan->comidaReal->carbohidratos_g }} g
+                                </p>
+                                @if ($plan->comidaReal->notas)
+                                    <p class="mt-1 text-sm text-gray-500">{{ $plan->comidaReal->notas }}</p>
+                                @endif
+                                @if ($plan->comidaReal->imagenUrl())
+                                    <img src="{{ $plan->comidaReal->imagenUrl() }}" alt="{{ __('Evidencia visual') }}" class="mt-2 max-h-48 rounded-lg">
+                                @endif
+                            @else
+                                <a href="{{ route('comida-real.create', $plan) }}" class="text-sm text-indigo-600 underline">
+                                    {{ __('Registrar comida real') }}
+                                </a>
+                            @endif
+                        </div>
                     </div>
                 @endforeach
 

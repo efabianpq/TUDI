@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 #[Fillable([
     'plan_comida_id',
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'carbohidratos_g',
     'consumido_en',
     'notas',
+    'imagen_evidencia',
 ])]
 class ComidaReal extends Model
 {
@@ -41,5 +43,16 @@ class ComidaReal extends Model
     public function planComida(): BelongsTo
     {
         return $this->belongsTo(PlanComida::class, 'plan_comida_id');
+    }
+
+    /**
+     * Public URL of the evidence image (disk "public", requires storage:link),
+     * or null when no image was uploaded for this ComidaReal.
+     */
+    public function imagenUrl(): ?string
+    {
+        return $this->imagen_evidencia
+            ? Storage::disk('public')->url($this->imagen_evidencia)
+            : null;
     }
 }

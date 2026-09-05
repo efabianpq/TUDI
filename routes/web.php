@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
@@ -30,6 +31,9 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/plan', [PlanComidaController::class, 'index'])->name('planes.index');
     Route::post('/plan/generar', [PlanComidaController::class, 'generar'])->name('planes.generar');
+
+    Route::get('/plan/{planComida}/comida-real', [ComidaRealController::class, 'create'])->name('comida-real.create');
+    Route::post('/plan/{planComida}/comida-real', [ComidaRealController::class, 'store'])->name('comida-real.store');
 });
 
 require __DIR__.'/auth.php';

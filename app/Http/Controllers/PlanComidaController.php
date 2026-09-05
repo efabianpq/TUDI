@@ -42,7 +42,7 @@ class PlanComidaController extends Controller
         return view('planes.index', [
             'registroDiario' => $registroDiario,
             'planes' => $registroDiario
-                ? $registroDiario->planesComida()->orderBy('id')->get()
+                ? $registroDiario->planesComida()->with('comidaReal')->orderBy('id')->get()
                 : collect(),
             'ingredientes' => $registroDiario
                 ? $registroDiario->ingredientesDisponibles()->get()

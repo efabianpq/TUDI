@@ -122,6 +122,26 @@ No hace falta una pasada de calorías propiamente dicha: por construcción de la
 
 **Tests:** `tests/Unit/MealPlanGeneratorServiceTest.php` (el servicio toca Eloquent, así que ese archivo hace `uses(TestCase::class, RefreshDatabase::class)` explícito — `tests/Pest.php` solo aplica `RefreshDatabase` a `Feature`) cubre que el reparto suma 100%, plan con despensa suficiente cercano al objetivo, cada comida en su porcentaje, día sin ingredientes → excepción, que nunca se reparten más gramos de los reportados, que se persiste `ingredientes_detalle` cuadrando con los totales, y que regenerar conserva las comidas ya consumidas. `tests/Feature/PlanComidaTest.php` cubre el flujo HTTP: acceso protegido, generación de las tres comidas, la vista del plan, y los tres caminos de fallo controlado (sin registro diario, sin ingredientes, sin parámetros de perfil).
 
+## 4.3. Registro de comida real (implementado)
+
+`app/Services/ComidaRealService.php` (método público `registrar(PlanComida $planComida, array $datos, ?UploadedFile $imagen = null): ComidaReal`) es el único punto de entrada para registrar lo que el usuario realmente comió. Todo corre dentro de una transacción y hace tres cosas en orden:
+
+1. Guarda la imagen de evidencia (si se subió) con `$imagen->store('comidas-reales', 'public')` — disco `public` (`storage/app/public`, requiere `storage:link`, ya ejecutado). Sin ningún procesamiento (compresión, análisis): es solo evidencia visual, tal como indica el documento de arquitectura. Crea el `ComidaReal` con `consumido_en = now()`.
+2. **Redistribución de calorías pendientes** (método privado `redistribuirCaloriasPendientes`): calcula `desviacion = calorias_reales - calorias_estimadas` de la comida recién registrada y la reparte, con signo, entre los `PlanComida` del mismo `RegistroDiario` que **todavía no tienen** `ComidaReal` (`doesntHave('comidaReal')`), proporcionalmente a la participación de cada uno en el total planificado pendiente. Un exceso reduce `calorias_estimadas` de las comidas restantes; comer de menos lo aumenta. Nunca deja una comida en negativo (`max(0, ...)`). Las comidas ya registradas no se tocan nunca.
+3. **Actualiza `calorias_consumidas`** del `RegistroDiario` (método privado `actualizarCaloriasConsumidas`) como la suma de `calorias_reales` de todos los `ComidaReal` del día — se recalcula desde cero en cada registro, no se acumula con `+=`, para que sea idempotente si algún día se permite editar una `ComidaReal`.
+
+**Decisión de diseño — por qué reparto proporcional y no reparto parejo:** almuerzo y cena no tienen el mismo presupuesto planificado (40% vs. 35% del día); repartir el excedente/déficit a partes iguales entre ambos distorsionaría más a la comida más pequeña. Repartir según la participación actual de cada una en el total pendiente mantiene la proporción relativa del reparto original de `MealPlanGeneratorService::DISTRIBUCION_COMIDAS`.
+
+- **Columna nueva:** migración `add_imagen_evidencia_a_comidas_reales_table` añade `imagen_evidencia` (string nullable) a `comidas_reales`. `ComidaReal::imagenUrl(): ?string` expone `Storage::disk('public')->url(...)` o `null` si no se subió imagen.
+- **`ComidaRealRequest`** (`app/Http/Requests/`): `calorias_reales`, `proteina_g`, `grasa_g`, `carbohidratos_g` (numéricos, `min:0`, requeridos), `imagen` (nullable, `image`, `max:4096` KB), `notas` (nullable, string, `max:1000`). No valida `grasa_g`/`carbohidratos_g` contra el plan — son datos reales, pueden diferir de lo planificado libremente.
+- **`ComidaRealController`** (`app/Http/Controllers/`), rutas bajo `auth`:
+  - `GET /plan/{planComida}/comida-real` (`comida-real.create`) — formulario.
+  - `POST /plan/{planComida}/comida-real` (`comida-real.store`) — llama a `ComidaRealService::registrar()`.
+  - 403 si `planComida->registroDiario->usuario_id` no es el usuario autenticado; redirige a `planes.index` con `error` si el `PlanComida` ya tiene una `ComidaReal` (relación 1—1, no se sobrescribe).
+- **Vista** `resources/views/comidas-reales/create.blade.php`; `resources/views/planes/index.blade.php` muestra, por cada comida, el enlace "Registrar comida real" si aún no tiene una, o sus macros reales + notas + imagen si ya la tiene.
+
+**Tests:** `tests/Feature/ComidaRealTest.php` cubre: acceso protegido por `auth` y por dueño del `RegistroDiario` (403 cruzado entre usuarios), que registrar una `ComidaReal` actualiza `calorias_consumidas` del `RegistroDiario` (y que se acumula correctamente al registrar una segunda comida), que un exceso de calorías en el desayuno reduce proporcionalmente `calorias_estimadas` de almuerzo y cena (aún no registrados) sin tocar el desayuno ya registrado, y que subir una imagen (`Storage::fake('public')`) la deja accesible en `storage/comidas-reales/*` con la URL pública esperada.
+
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
 Implementar exactamente así en `NutritionCalculatorService` (o el nombre que se use), con tests unitarios por cada fórmula:
