@@ -3,6 +3,7 @@
 use App\Http\Controllers\ActividadFisicaController;
 use App\Http\Controllers\CierreDiarioController;
 use App\Http\Controllers\ComidaRealController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
@@ -15,9 +16,9 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/dashboard', function () {
-    return view('dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+Route::get('/dashboard', [DashboardController::class, 'index'])
+    ->middleware(['auth', 'verified'])
+    ->name('dashboard');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
