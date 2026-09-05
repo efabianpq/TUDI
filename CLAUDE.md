@@ -28,8 +28,8 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Usuarios y perfil | `app/Models/User.php`, `app/Http/Controllers/ProfileController.php` |
 | Nutrición | `app/Models/PlanComida.php`, `app/Models/ComidaReal.php`, `app/Services/NutritionCalculatorService.php`, `app/Services/MealPlanGeneratorService.php` |
 | Actividad física | `app/Models/ActividadFisica.php`, `app/Services/ActivityCorrectionService.php` |
-| Cierre diario | `app/Services/DailyClosureService.php`, `app/Console/Commands/RunDailyClosure.php` |
-| Analítica | `app/Models/MetricaTendencia.php`, `app/Services/TrendAnalyticsService.php`, `app/Http/Controllers/ProgresoController.php`, `app/Console/Commands/CalculateTrends.php` (pendiente) |
+| Cierre diario | `app/Services/DailyClosureService.php`, `app/Console/Commands/RunDailyClosure.php` (programado `dailyAt('00:15')`) |
+| Analítica | `app/Models/MetricaTendencia.php`, `app/Services/TrendAnalyticsService.php`, `app/Http/Controllers/ProgresoController.php`, `app/Console/Commands/CalculateTrends.php` (programado `dailyAt('00:30')`) |
 | Motor de recomendaciones | `app/Services/RulesEngineService.php`, `app/Http/Controllers/RecomendacionSistemaController.php` |
 | Motor de IA/reglas | `app/Services/AI/NutritionAiProviderInterface.php` + implementación concreta |
 | Dashboard principal | `app/Http/Controllers/DashboardController.php` (`GET /dashboard`), compone `DailyClosureService` + `TrendAnalyticsService` + `RecomendacionSistema`, sin lógica propia |
@@ -207,7 +207,7 @@ Sin Form Request: ninguna de las tres acciones recibe entrada del usuario (el d�
 
 **Vista** `resources/views/cierre/index.blade.php`: los cinco puntos del cierre (objetivo vs. consumidas, gasto por actividad ajustado, déficit estimado, cumplimiento de proteína) más el bloque de "Recomendaciones", vacío hasta el Prompt 10. Enlace "Cierre del día" añadido a `resources/views/layouts/navigation.blade.php`.
 
-**Pendiente:** `app/Console/Commands/RunDailyClosure.php` (cierre automático programado, sección 3) todavía no existe — por ahora el cierre es solo manual.
+**Automatización (implementada):** `app/Console/Commands/RunDailyClosure.php` (`app:run-daily-closure`) recorre los `RegistroDiario` de **ayer** con `cerrado = false` y llama a `DailyClosureService::cerrar()` sobre cada uno; un perfil incompleto o un cálculo inválido (`NegativeCarbohydrateException`/`InvalidNutritionParameterException`) se registra con `$this->warn()` y se salta, sin interrumpir el resto del lote. Programado en `routes/console.php` vía `Schedule::command('app:run-daily-closure')->dailyAt('00:15')`.
 
 **`RegistroDiarioFactory`:** su definición por defecto ahora produce un día **abierto** con las columnas del cierre en `null` (antes rellenaba cifras aleatorias y `cerrado` aleatorio, lo que con la nueva regla de inmutabilidad hacía fallar de forma intermitente a los tests que escriben sobre el día). Para un día ya cerrado hay un estado explícito: `RegistroDiario::factory()->cerrado()`.
 
@@ -288,7 +288,7 @@ indice_consistencia_pct = días con RegistroDiario cerrado / 7 * 100
 
 **Vista** `resources/views/progreso/index.blade.php`: tres tarjetas (promedio móvil de peso + % semanal y tendencia, déficit promedio, índice de consistencia con el "N de 7 días cerrados") y un gráfico de línea de Chart.js con la evolución del promedio móvil de peso. La serie viaja al navegador en `data-serie` del `<canvas>` (JSON), no en una variable global. Si el CDN no carga, la página sigue siendo útil: las tres cifras son server-rendered y el script se autolimita (`typeof Chart === 'undefined'` → return). Con menos de 7 días de historial se muestra un aviso ámbar en vez de ocultar las cifras. Enlace "Mi progreso" añadido a `resources/views/layouts/navigation.blade.php`, y `@stack('scripts')` a `resources/views/layouts/app.blade.php` (no existía).
 
-**Pendiente:** `app/Console/Commands/CalculateTrends.php` — el cálculo programado nocturno para todos los usuarios. Debe limitarse a llamar a `calcularYPersistir()` por usuario; toda la lógica ya está en el servicio.
+**Automatización (implementada):** `app/Console/Commands/CalculateTrends.php` (`app:calculate-trends`) recorre todos los `User` (no existe una columna "activo" en `users` en el MVP, así que "usuarios activos" es todo usuario registrado — el propio servicio no falla si un usuario no tiene ningún `RegistroDiario` todavía) y llama a `TrendAnalyticsService::calcularYPersistir()` con la fecha de corte de hoy. Programado en `routes/console.php` vía `Schedule::command('app:calculate-trends')->dailyAt('00:30')` — 15 minutos después del cierre diario, para que ya estén persistidas las columnas (`deficit_diario`, etc.) que este comando promedia.
 
 **Tests:** `tests/Unit/TrendAnalyticsServiceTest.php` (usa `TestCase` + `RefreshDatabase` explícitos, mismo patrón que los demás Services que tocan Eloquent; fecha de corte fija `2026-03-15` para no depender del día de ejecución) cubre: el promedio móvil de peso sobre 10 días de pesos conocidos contra el cálculo manual escrito en el propio test (los 3 días más antiguos quedan fuera de la ventana y se verifica que no la mueven), el promedio móvil de déficit, el índice de consistencia con 4/7, 0/7 y 7/7 días cerrados (y que un día cerrado fuera de la ventana no lo infla), historial de 3 días → `datos_suficientes` false sin excepción, usuario sin ningún registro, registros sin peso apuntado, días sin peso ignorados en vez de contados como cero, las cuatro clasificaciones de `tendencia`, aislamiento entre usuarios, persistencia de una única fila y recálculo que actualiza en sitio, y la serie histórica (fechas correctas, ventana de cada punto, y huecos `null` en vez de excepción). `tests/Feature/ProgresoTest.php` cubre el flujo HTTP: acceso protegido por `auth`, las tres cifras visibles en la vista, la consistencia con días sin cerrar, el snapshot persistido al consultar (y no duplicado al recargar), el aviso de datos insuficientes, usuario recién registrado sin datos, la serie en el `<canvas>`, y que no se mezcla el progreso de otro usuario.
 
@@ -390,7 +390,7 @@ calorias_actividad_ajustada = calorias_dispositivo * factor_correccion   [factor
 
 ## 10. Despliegue (Hostinger)
 
-- Un solo cron job: `* * * * * php /home/USER/domains/DOMINIO/public_html/artisan schedule:run >> /dev/null 2>&1`.
+- Un solo cron job: `* * * * * php /home/USER/domains/DOMINIO/public_html/artisan schedule:run >> /dev/null 2>&1`. Toda la automatización diaria (`app:run-daily-closure` 00:15, `app:calculate-trends` 00:30) está registrada en el Scheduler vía `routes/console.php` (Laravel 13 no usa `app/Console/Kernel.php`) para poder depender de este único cron — no asumir que Hostinger permite varios cron jobs de Laravel independientes.
 - **Resuelto:** `TrendAnalyticsService` calcula el promedio móvil en PHP sobre los últimos 7 `RegistroDiario`, así que no hace falta verificar la versión del plan contratado — no se usa `AVG() OVER (...)` en ningún sitio. Versión mínima asumida: MySQL 5.7 / MariaDB 10.1 (sección 4.7).
 - Variables sensibles (API key del proveedor de IA, credenciales de MySQL) solo en `.env`, nunca hardcodeadas ni commiteadas.
 - Antes de cada despliegue: `composer install --no-dev`, `php artisan migrate --force`, `php artisan config:cache`.
