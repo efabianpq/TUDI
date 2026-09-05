@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\RecomendacionYaProcesadaException;
 use App\Models\RecomendacionSistema;
 use App\Models\RegistroDiario;
+use App\Services\AI\NutritionAiProviderInterface;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -46,6 +47,10 @@ class RulesEngineService
      */
     private const SEMANAS_ESTANCAMIENTO = 3;
 
+    public function __construct(
+        private readonly NutritionAiProviderInterface $aiProvider,
+    ) {}
+
     /**
      * Decide qué dirección de ajuste corresponde, si alguna, según la regla
      * literal de la sección 6. Público para poder testear la regla sola, sin
@@ -84,23 +89,13 @@ class RulesEngineService
             ? $caloriasActuales - self::AJUSTE_KCAL_SUGERIDO
             : $caloriasActuales + self::AJUSTE_KCAL_SUGERIDO;
 
-        $mensaje = $direccion === 'reducir'
-            ? sprintf(
-                'Tu pérdida de peso promedio de las últimas semanas es %.2f%% semanal, por debajo del 0.5%% recomendado. '.
-                'Sugerimos reducir tu objetivo calórico en %d kcal: de %s a %s kcal.',
-                $porcentajePerdidaSemanal,
-                self::AJUSTE_KCAL_SUGERIDO,
-                number_format($caloriasActuales, 0),
-                number_format($caloriasSugeridas, 0),
-            )
-            : sprintf(
-                'Tu pérdida de peso promedio de las últimas semanas es %.2f%% semanal, por encima del 1%% recomendado. '.
-                'Sugerimos aumentar tu objetivo calórico en %d kcal: de %s a %s kcal.',
-                $porcentajePerdidaSemanal,
-                self::AJUSTE_KCAL_SUGERIDO,
-                number_format($caloriasActuales, 0),
-                number_format($caloriasSugeridas, 0),
-            );
+        $mensaje = $this->aiProvider->generarTextoRecomendacion(self::TIPO_AJUSTE_CALORICO, [
+            'direccion' => $direccion,
+            'porcentaje_perdida_semanal' => $porcentajePerdidaSemanal,
+            'calorias_actuales' => $caloriasActuales,
+            'calorias_sugeridas' => $caloriasSugeridas,
+            'ajuste_kcal_sugerido' => self::AJUSTE_KCAL_SUGERIDO,
+        ]);
 
         return RecomendacionSistema::create([
             'registro_diario_id' => $registroDiario->id,
@@ -133,12 +128,10 @@ class RulesEngineService
             }
         }
 
-        $mensaje = sprintf(
-            'Tu peso se ha mantenido prácticamente igual (variación menor a %.1f kg) durante las últimas %d semanas. '.
-            'Esto puede indicar un estancamiento; es solo informativo, no cambia tu objetivo calórico automáticamente.',
-            self::UMBRAL_ESTANCAMIENTO_KG,
-            self::SEMANAS_ESTANCAMIENTO,
-        );
+        $mensaje = $this->aiProvider->generarTextoRecomendacion(self::TIPO_ALERTA_ESTANCAMIENTO, [
+            'umbral_estancamiento_kg' => self::UMBRAL_ESTANCAMIENTO_KG,
+            'semanas_estancamiento' => self::SEMANAS_ESTANCAMIENTO,
+        ]);
 
         return RecomendacionSistema::create([
             'registro_diario_id' => $registroDiario->id,

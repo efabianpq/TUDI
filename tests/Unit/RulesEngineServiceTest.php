@@ -21,7 +21,7 @@ function registroParaRecomendacion(float $caloriasObjetivo = 2000.0): RegistroDi
 it('sugiere reducir el objetivo calórico cuando la pérdida semanal es menor a 0.5%', function () {
     $registro = registroParaRecomendacion(2000.0);
 
-    $recomendacion = (new RulesEngineService)->generarRecomendacionAjusteCalorico($registro, 0.3);
+    $recomendacion = app(RulesEngineService::class)->generarRecomendacionAjusteCalorico($registro, 0.3);
 
     expect($recomendacion)->not->toBeNull()
         ->and($recomendacion->tipo)->toBe('ajuste_calorico')
@@ -32,7 +32,7 @@ it('sugiere reducir el objetivo calórico cuando la pérdida semanal es menor a 
 it('sugiere aumentar el objetivo calórico cuando la pérdida semanal es mayor a 1%', function () {
     $registro = registroParaRecomendacion(2000.0);
 
-    $recomendacion = (new RulesEngineService)->generarRecomendacionAjusteCalorico($registro, 1.5);
+    $recomendacion = app(RulesEngineService::class)->generarRecomendacionAjusteCalorico($registro, 1.5);
 
     expect($recomendacion)->not->toBeNull()
         ->and($recomendacion->tipo)->toBe('ajuste_calorico')
@@ -43,7 +43,7 @@ it('sugiere aumentar el objetivo calórico cuando la pérdida semanal es mayor a
 it('no genera recomendación cuando la pérdida semanal está entre 0.5% y 1%', function () {
     $registro = registroParaRecomendacion(2000.0);
 
-    $recomendacion = (new RulesEngineService)->generarRecomendacionAjusteCalorico($registro, 0.75);
+    $recomendacion = app(RulesEngineService::class)->generarRecomendacionAjusteCalorico($registro, 0.75);
 
     expect($recomendacion)->toBeNull()
         ->and($registro->recomendacionesSistema()->count())->toBe(0);
@@ -51,7 +51,7 @@ it('no genera recomendación cuando la pérdida semanal está entre 0.5% y 1%', 
 
 it('confirmar una recomendación de ajuste calórico actualiza calorias_objetivo del usuario', function () {
     $registro = registroParaRecomendacion(2000.0);
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
     $recomendacion = $motor->generarRecomendacionAjusteCalorico($registro, 0.3);
     $caloriasSugeridas = (float) $recomendacion->calorias_objetivo_sugeridas;
 
@@ -64,7 +64,7 @@ it('confirmar una recomendación de ajuste calórico actualiza calorias_objetivo
 
 it('rechazar una recomendación no modifica calorias_objetivo del usuario', function () {
     $registro = registroParaRecomendacion(2000.0);
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
     $recomendacion = $motor->generarRecomendacionAjusteCalorico($registro, 0.3);
 
     $motor->rechazar($recomendacion);
@@ -75,7 +75,7 @@ it('rechazar una recomendación no modifica calorias_objetivo del usuario', func
 
 it('no permite confirmar dos veces la misma recomendación', function () {
     $registro = registroParaRecomendacion(2000.0);
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
     $recomendacion = $motor->generarRecomendacionAjusteCalorico($registro, 0.3);
     $motor->confirmar($recomendacion);
 
@@ -84,7 +84,7 @@ it('no permite confirmar dos veces la misma recomendación', function () {
 
 it('detecta estancamiento tras varias semanas consecutivas con variación de peso mínima', function () {
     $registro = registroParaRecomendacion();
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
 
     $recomendacion = $motor->detectarEstancamiento($registro, [0.1, -0.1, 0.05]);
 
@@ -96,7 +96,7 @@ it('detecta estancamiento tras varias semanas consecutivas con variación de pes
 
 it('no detecta estancamiento si alguna semana reciente tuvo variación significativa', function () {
     $registro = registroParaRecomendacion();
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
 
     $recomendacion = $motor->detectarEstancamiento($registro, [0.1, -0.1, 0.8]);
 
@@ -105,7 +105,7 @@ it('no detecta estancamiento si alguna semana reciente tuvo variación significa
 
 it('no detecta estancamiento con menos semanas que el mínimo requerido', function () {
     $registro = registroParaRecomendacion();
-    $motor = new RulesEngineService;
+    $motor = app(RulesEngineService::class);
 
     $recomendacion = $motor->detectarEstancamiento($registro, [0.05, 0.05]);
 

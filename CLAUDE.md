@@ -305,6 +305,16 @@ indice_consistencia_pct = días con RegistroDiario cerrado / 7 * 100
 
 **Tests:** `tests/Feature/DashboardTest.php` cubre acceso protegido por `auth`, el resumen de hoy con las cinco cifras esperadas más el estado de las tres comidas (registrada/planificada/pendiente) y una recomendación pendiente visible, que confirmar una recomendación desde el dashboard (`->from(route('dashboard'))`) redirige de vuelta al dashboard, el aviso de perfil incompleto sin 500, un usuario sin nada registrado hoy, y que no se mezclan datos entre usuarios.
 
+## 4.9. Interfaz de proveedor de IA/reglas (implementado)
+
+`app/Services/AI/NutritionAiProviderInterface.php` desacopla el dominio de "quién decide" dos cosas que hoy resuelve una heurística de reglas pero que en el futuro podría resolver un modelo de IA generativa: qué ingredientes usar en una comida (`sugerirIngredientesParaComida()`) y cómo redactar el texto de una `RecomendacionSistema` (`generarTextoRecomendacion()`).
+
+- **`RuleBasedNutritionProvider`** (`app/Services/AI/RuleBasedNutritionProvider.php`) es la única implementación hoy y la que está bindeada. **No duplica lógica**: la heurística codiciosa de selección de ingredientes (antes privada en `MealPlanGeneratorService`, sección 4.2) y las plantillas de texto de las recomendaciones (antes privadas en `RulesEngineService`, sección 4.6) se movieron aquí tal cual; `MealPlanGeneratorService` y `RulesEngineService` ahora reciben `NutritionAiProviderInterface` por inyección de constructor y delegan en ella en vez de implementar la lógica ellos mismos.
+- **Binding:** `AppServiceProvider::register()` liga `NutritionAiProviderInterface` a `RuleBasedNutritionProvider`. Es el único sitio que habría que tocar para cambiar de proveedor.
+- **A propósito no implementado en este prompt:** ninguna llamada real a un proveedor de IA externo. Una futura `GenerativeAiProvider` (usando Guzzle, ya mencionado en el docblock de la interfaz) implementaría el mismo contrato — el resto del dominio no necesitaría cambios, solo el binding de `AppServiceProvider`.
+
+**Tests:** `tests/Unit/RuleBasedNutritionProviderTest.php` (usa `TestCase` explícito para poder resolver el binding vía el contenedor, sin necesitar base de datos) cubre que la interfaz resuelve a `RuleBasedNutritionProvider`, que la selección de ingredientes prioriza proteína → grasa → carbohidratos igual que documenta la sección 4.2, que el inventario se descuenta in place entre comidas sucesivas, los tres textos de recomendación (reducir, aumentar, estancamiento) con el mismo formato que ya cubrían los tests de `RulesEngineService`, y que un tipo desconocido lanza `InvalidArgumentException`. Los tests existentes de `MealPlanGeneratorServiceTest` y `RulesEngineServiceTest` siguen pasando sin cambios de aserciones (solo se ajustó cómo se instancian los servicios en los tests, vía `app()` en vez de `new`, porque ahora tienen una dependencia de constructor).
+
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
 Implementar exactamente así en `NutritionCalculatorService` (o el nombre que se use), con tests unitarios por cada fórmula:
