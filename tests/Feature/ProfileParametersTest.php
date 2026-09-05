@@ -49,7 +49,52 @@ test('profile parameters can be updated with valid values', function () {
         ->and($user->tipo_deficit)->toBe('porcentaje')
         ->and((float) $user->valor_deficit)->toBe(0.2)
         ->and((float) $user->proteina_factor)->toBe(2.0)
-        ->and((float) $user->grasa_factor)->toBe(0.8);
+        ->and((float) $user->grasa_factor)->toBe(0.8)
+        // 80.5 * 22 * 1.55 * (1 - 0.2) = 2196.04 kcal
+        ->and((float) $user->calorias_objetivo)->toBe(2196.04);
+});
+
+test('saving the parameters derives the calorie target in force', function () {
+    $user = User::factory()->create(['calorias_objetivo' => null]);
+
+    $this->actingAs($user)->put('/profile/parametros', [
+        'peso_kg' => 80,
+        'estatura_m' => 1.75,
+        'edad' => 35,
+        'sexo' => 'masculino',
+        'nivel_actividad' => 1.5,
+        'tipo_deficit' => 'porcentaje',
+        'valor_deficit' => 0.2,
+        'proteina_factor' => 2.0,
+        'grasa_factor' => 0.8,
+    ])->assertSessionHasNoErrors();
+
+    // 80 * 22 * 1.5 * (1 - 0.2) = 2112 kcal. Sin esto la columna quedaba null
+    // para todo usuario registrado desde la app y RulesEngineService la leía
+    // como 0 al dimensionar un ajuste (CLAUDE.md sección 4.10).
+    expect((float) $user->fresh()->calorias_objetivo)->toBe(2112.0);
+});
+
+test('a profile whose macros do not fit its own calorie target is not saved', function () {
+    $user = User::factory()->create();
+    $parametrosPrevios = $user->only(['peso_kg', 'valor_deficit', 'proteina_factor', 'grasa_factor']);
+
+    // 80 * 22 * 1.2 * (1 - 0.5) = 1056 kcal, pero proteína (176 g = 704 kcal) y
+    // grasa (80 g = 720 kcal) ya suman 1424: carbohidratos negativos.
+    $this->actingAs($user)->put('/profile/parametros', [
+        'peso_kg' => 80,
+        'estatura_m' => 1.75,
+        'edad' => 35,
+        'sexo' => 'masculino',
+        'nivel_actividad' => 1.2,
+        'tipo_deficit' => 'porcentaje',
+        'valor_deficit' => 0.5,
+        'proteina_factor' => 2.2,
+        'grasa_factor' => 1.0,
+    ])->assertSessionHasErrors('valor_deficit');
+
+    expect($user->fresh()->only(['peso_kg', 'valor_deficit', 'proteina_factor', 'grasa_factor']))
+        ->toBe($parametrosPrevios);
 });
 
 test('profile parameters fail validation when out of range', function (string $field, mixed $value) {

@@ -74,6 +74,11 @@ class RulesEngineService
      * tendencia lo justifica, o null si la pérdida semanal está dentro del
      * rango esperado (0.5%–1%). Nunca modifica calorias_objetivo del usuario:
      * eso solo ocurre al confirmar (ver confirmar()).
+     *
+     * Tampoco genera nada si el usuario todavía no tiene un objetivo calórico
+     * vigente: sin una cifra de partida, `(float) null` valdría 0 y se sugeriría
+     * un objetivo negativo (ver CLAUDE.md sección 4.10). No hay ajuste posible
+     * sobre un objetivo que aún no existe.
      */
     public function generarRecomendacionAjusteCalorico(RegistroDiario $registroDiario, float $porcentajePerdidaSemanal): ?RecomendacionSistema
     {
@@ -85,6 +90,11 @@ class RulesEngineService
 
         $usuario = $registroDiario->usuario;
         $caloriasActuales = (float) $usuario->calorias_objetivo;
+
+        if ($caloriasActuales <= 0.0) {
+            return null;
+        }
+
         $caloriasSugeridas = $direccion === 'reducir'
             ? $caloriasActuales - self::AJUSTE_KCAL_SUGERIDO
             : $caloriasActuales + self::AJUSTE_KCAL_SUGERIDO;

@@ -144,6 +144,42 @@ test('accepts a plan whose carbohydrate kcal land exactly on zero', function () 
         ->and($plan['carbohidratos_g'])->toEqualWithDelta(0.0, NUTRITION_DELTA);
 });
 
+test('an in-force calorie target replaces the one derived from the deficit', function () {
+    // Mismo perfil que da 2112 kcal por fórmula, pero con un objetivo vigente de
+    // 1962 (una RecomendacionSistema confirmada, CLAUDE.md sección 4.10).
+    $plan = nutritionCalculator()->calculatePlan(
+        pesoKg: 80.0,
+        nivelActividad: 1.5,
+        tipoDeficit: 'porcentaje',
+        valorDeficit: 0.2,
+        proteinaFactor: 2.0,
+        grasaFactor: 0.8,
+        caloriasObjetivoVigente: 1962.0,
+    );
+
+    // Proteína y grasa siguen saliendo de peso × factor; los carbohidratos
+    // absorben la diferencia, como manda la sección 5.
+    //   carbohidratos_kcal = 1962 - (640 + 576) = 746 -> 186.5 g
+    expect($plan['calorias_objetivo'])->toEqualWithDelta(1962.0, NUTRITION_DELTA)
+        ->and($plan['proteina_g'])->toEqualWithDelta(160.0, NUTRITION_DELTA)
+        ->and($plan['grasa_g'])->toEqualWithDelta(64.0, NUTRITION_DELTA)
+        ->and($plan['carbohidratos_g'])->toEqualWithDelta(186.5, NUTRITION_DELTA);
+});
+
+test('an in-force calorie target too small for its own macros is still rejected', function () {
+    // La validación obligatoria de la sección 5 no se salta por venir de un
+    // objetivo vigente: 900 kcal no dan para 640 de proteína + 576 de grasa.
+    nutritionCalculator()->calculatePlan(
+        pesoKg: 80.0,
+        nivelActividad: 1.5,
+        tipoDeficit: 'porcentaje',
+        valorDeficit: 0.2,
+        proteinaFactor: 2.0,
+        grasaFactor: 0.8,
+        caloriasObjetivoVigente: 900.0,
+    );
+})->throws(NegativeCarbohydrateException::class);
+
 test('rejects macro factors outside the ranges of CLAUDE.md sections 5 and 6', function (string $parametro, float $proteinaFactor, float $grasaFactor) {
     expect(fn () => nutritionCalculator()->calculatePlan(
         pesoKg: 80.0,

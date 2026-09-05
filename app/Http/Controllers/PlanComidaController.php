@@ -81,6 +81,9 @@ class PlanComidaController extends Controller
                 (float) $usuario->valor_deficit,
                 (float) $usuario->proteina_factor,
                 (float) $usuario->grasa_factor,
+                // The target in force, which a confirmed RecomendacionSistema may
+                // have moved away from the raw formula (CLAUDE.md section 4.10).
+                $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
             );
 
             $this->generador->generarPlan($registroDiario, $planNutricional);

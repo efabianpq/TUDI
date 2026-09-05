@@ -49,6 +49,18 @@ it('no genera recomendación cuando la pérdida semanal está entre 0.5% y 1%', 
         ->and($registro->recomendacionesSistema()->count())->toBe(0);
 });
 
+it('no sugiere un ajuste sobre un objetivo calórico que todavía no existe', function () {
+    $usuario = User::factory()->create(['calorias_objetivo' => null]);
+    $registro = RegistroDiario::factory()->for($usuario, 'usuario')->create();
+
+    // Sin esta guarda, `(float) null` valía 0 y se persistía una recomendación
+    // de -150 kcal (CLAUDE.md sección 4.10).
+    $recomendacion = app(RulesEngineService::class)->generarRecomendacionAjusteCalorico($registro, 0.3);
+
+    expect($recomendacion)->toBeNull()
+        ->and($registro->recomendacionesSistema()->count())->toBe(0);
+});
+
 it('confirmar una recomendación de ajuste calórico actualiza calorias_objetivo del usuario', function () {
     $registro = registroParaRecomendacion(2000.0);
     $motor = app(RulesEngineService::class);

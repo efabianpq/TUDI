@@ -45,8 +45,17 @@ class NutritionCalculatorService
     /**
      * Compute the daily calorie target and the macronutrient split for a user.
      *
+     * $caloriasObjetivoVigente is the target currently in force for the user
+     * (users.calorias_objetivo). When it is set it replaces the target derived
+     * from TMB and the deficit, because CLAUDE.md section 6 lets a confirmed
+     * RecomendacionSistema move that target away from the raw formula. The
+     * macros keep deriving exactly as section 5 says: protein and fat from
+     * weight × factor, carbohydrates as whatever calories are left over — so
+     * the negative-carbohydrate validation still applies to the new target.
+     *
      * @param  string  $tipoDeficit  self::TIPO_DEFICIT_PORCENTAJE ("porcentaje") or self::TIPO_DEFICIT_FIJO ("fijo")
      * @param  float  $valorDeficit  fraction (0.2 = 20%) when "porcentaje", kcal when "fijo"
+     * @param  float|null  $caloriasObjetivoVigente  target in force, or null to derive it from the deficit
      * @return array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}
      *
      * @throws InvalidNutritionParameterException when proteina_factor/grasa_factor are out of range or tipo_deficit is unknown
@@ -59,6 +68,7 @@ class NutritionCalculatorService
         float $valorDeficit,
         float $proteinaFactor,
         float $grasaFactor,
+        ?float $caloriasObjetivoVigente = null,
     ): array {
         // CLAUDE.md section 6: always validate the macro factors before computing a plan.
         $this->assertInRange('proteina_factor', $proteinaFactor, self::PROTEINA_FACTOR_MIN, self::PROTEINA_FACTOR_MAX);
@@ -67,7 +77,7 @@ class NutritionCalculatorService
         $tmb = $pesoKg * self::TMB_FACTOR;
         $caloriasMantenimiento = $tmb * $nivelActividad;
 
-        $caloriasObjetivo = match ($tipoDeficit) {
+        $caloriasObjetivo = $caloriasObjetivoVigente ?? match ($tipoDeficit) {
             self::TIPO_DEFICIT_PORCENTAJE => $caloriasMantenimiento * (1 - $valorDeficit),
             self::TIPO_DEFICIT_FIJO => $caloriasMantenimiento - $valorDeficit,
             default => throw InvalidNutritionParameterException::unsupportedDeficitType($tipoDeficit),
