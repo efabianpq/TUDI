@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\IngredienteDisponibleController;
+use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
 use Illuminate\Support\Facades\Route;
@@ -26,6 +27,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/registros-diarios/{registroDiario}/ingredientes', [IngredienteDisponibleController::class, 'index'])->name('ingredientes.index');
     Route::put('/ingredientes/{ingrediente}', [IngredienteDisponibleController::class, 'update'])->name('ingredientes.update');
     Route::delete('/ingredientes/{ingrediente}', [IngredienteDisponibleController::class, 'destroy'])->name('ingredientes.destroy');
+
+    Route::get('/plan', [PlanComidaController::class, 'index'])->name('planes.index');
+    Route::post('/plan/generar', [PlanComidaController::class, 'generar'])->name('planes.generar');
 });
 
 require __DIR__.'/auth.php';

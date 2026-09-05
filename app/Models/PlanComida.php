@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'registro_diario_id',
     'tipo_comida',
     'descripcion',
+    'ingredientes_detalle',
     'calorias_estimadas',
     'proteina_g',
     'grasa_g',
@@ -31,6 +32,7 @@ class PlanComida extends Model
     protected function casts(): array
     {
         return [
+            'ingredientes_detalle' => 'array',
             'calorias_estimadas' => 'decimal:2',
             'proteina_g' => 'decimal:2',
             'grasa_g' => 'decimal:2',
