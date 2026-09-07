@@ -8,6 +8,7 @@ Paso a paso concreto para publicar TUDéficit Inteligente en un hosting comparti
 - MySQL 8.x / MariaDB 10.6+ (mínimo asumido en el código: MySQL 5.7 / MariaDB 10.1 — ver `CLAUDE.md` sección 4.7; ninguna consulta usa funciones de ventana ni CTEs).
 - Acceso SSH o al menos un terminal/gestor de archivos con permiso para ejecutar `composer` y `php artisan` (Hostinger Business lo ofrece vía hPanel → "Avanzado → SSH Access").
 - Un único cron job disponible (ver sección 4).
+- **No se asume Node/npm en el servidor.** Los assets de Vite (`public/build/`) se compilan en local (`npm run build`) y se commitean al repo — `public/build` **no** está en `.gitignore` por esta razón. Cada vez que cambie CSS/JS (`resources/css`, `resources/js`, `tailwind.config.js`) hay que correr `npm run build` antes de hacer commit; de lo contrario el despliegue falla con `ViteManifestNotFoundException` al no existir `public/build/manifest.json`.
 
 ## 2. Estructura de carpetas en el servidor
 
