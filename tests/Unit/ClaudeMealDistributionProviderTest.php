@@ -2,7 +2,6 @@
 
 use App\Exceptions\MealDistributionUnavailableException;
 use App\Services\AI\ClaudeMealDistributionProvider;
-use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\MealPlanGeneratorService;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -81,11 +80,6 @@ function contextoDeEjemplo(array $fijas = [], array $reservadas = []): array
         'comidas_reservadas' => $reservadas,
     ];
 }
-
-it('resuelve la interfaz al proveedor de Claude vía el contenedor', function () {
-    expect(app(MealDistributionProviderInterface::class))
-        ->toBeInstanceOf(ClaudeMealDistributionProvider::class);
-});
 
 it('llama a la Messages API con Haiku 4.5 y salida estructurada', function () {
     Http::fake(['api.anthropic.com/*' => Http::response(respuestaDeClaude(comidasDeEjemplo()))]);

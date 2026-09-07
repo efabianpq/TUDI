@@ -5,7 +5,7 @@ namespace App\Exceptions;
 use RuntimeException;
 
 /**
- * El proveedor de distribución de comidas (Claude Haiku 4.5) no pudo producir
+ * El proveedor de distribución de comidas (Gemini 2.5 Flash) no pudo producir
  * una distribución: falta la clave de API, la llamada falló, o la respuesta no
  * cumplió el contrato esperado.
  *
@@ -15,11 +15,11 @@ use RuntimeException;
  */
 class MealDistributionUnavailableException extends RuntimeException
 {
-    public static function sinCredenciales(): self
+    public static function sinCredenciales(string $variableEnv = 'GEMINI_API_KEY'): self
     {
         return new self(
             'La generación de distribuciones con IA no está configurada. '.
-            'Define ANTHROPIC_API_KEY en el archivo .env para activarla.'
+            "Define {$variableEnv} en el archivo .env para activarla."
         );
     }
 

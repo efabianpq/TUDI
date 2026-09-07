@@ -2,7 +2,7 @@
 
 namespace App\Providers;
 
-use App\Services\AI\ClaudeMealDistributionProvider;
+use App\Services\AI\GeminiMealDistributionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\NutritionAiProviderInterface;
 use App\Services\AI\RuleBasedNutritionProvider;
@@ -23,8 +23,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Motor de "Generar distribución" (CLAUDE.md sección 4.12): interpreta
         // el texto libre de ingredientes de cada comida. Mismo criterio que
-        // arriba — cambiar de proveedor es cambiar esta línea.
-        $this->app->bind(MealDistributionProviderInterface::class, ClaudeMealDistributionProvider::class);
+        // arriba — cambiar de proveedor es cambiar esta línea. Gemini 2.5
+        // Flash reemplazó a Claude Haiku 4.5 como proveedor vigente.
+        $this->app->bind(MealDistributionProviderInterface::class, GeminiMealDistributionProvider::class);
     }
 
     /**

@@ -24,8 +24,10 @@ use App\Exceptions\MealDistributionUnavailableException;
  * cada uno usar; esta recibe lenguaje natural y tiene que estimar también los
  * macros. Son dos problemas distintos con dos entradas distintas.
  *
- * Implementación actual: ClaudeMealDistributionProvider (Claude Haiku 4.5).
- * El binding vive en AppServiceProvider.
+ * Implementación actual: GeminiMealDistributionProvider (Gemini 2.5 Flash).
+ * El binding vive en AppServiceProvider. ClaudeMealDistributionProvider
+ * (Claude Haiku 4.5) sigue en el repo, sin bindear, por si hiciera falta
+ * volver atrás.
  */
 interface MealDistributionProviderInterface
 {
