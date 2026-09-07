@@ -1,13 +1,13 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+        <h2 class="font-semibold text-lg sm:text-xl text-gray-800 leading-tight">
             {{ __('Registrar comida real') }} — <span class="capitalize">{{ $planComida->tipo_comida }}</span>
         </h2>
     </x-slot>
 
-    <div class="py-12">
-        <div class="max-w-2xl mx-auto sm:px-6 lg:px-8 space-y-6">
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
+    <div class="py-6 sm:py-12">
+        <div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+            <div class="p-4 sm:p-8 bg-white shadow-sm rounded-xl">
                 <p class="text-sm text-gray-600 mb-6">
                     {{ __('Planificado:') }}
                     {{ $planComida->calorias_estimadas }} kcal ·
@@ -51,7 +51,7 @@
 
                     <div>
                         <x-input-label for="notas" :value="__('Notas / ajustes (opcional)')" />
-                        <textarea id="notas" name="notas" rows="3" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">{{ old('notas') }}</textarea>
+                        <textarea id="notas" name="notas" rows="3" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-lg shadow-sm px-3 py-2.5 text-base sm:text-sm">{{ old('notas') }}</textarea>
                         <x-input-error :messages="$errors->get('notas')" class="mt-2" />
                     </div>
 

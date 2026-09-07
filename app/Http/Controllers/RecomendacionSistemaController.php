@@ -22,10 +22,10 @@ class RecomendacionSistemaController extends Controller
         try {
             $this->motor->confirmar($recomendacion);
         } catch (RecomendacionYaProcesadaException $e) {
-            return Redirect::back(fallback: route('cierre.index'))->with('error', $e->getMessage());
+            return Redirect::back(fallback: route('dashboard'))->with('error', $e->getMessage());
         }
 
-        return Redirect::back(fallback: route('cierre.index'))->with('status', 'recomendacion-confirmada');
+        return Redirect::back(fallback: route('dashboard'))->with('status', 'recomendacion-confirmada');
     }
 
     public function rechazar(Request $request, RecomendacionSistema $recomendacion): RedirectResponse
@@ -35,9 +35,9 @@ class RecomendacionSistemaController extends Controller
         try {
             $this->motor->rechazar($recomendacion);
         } catch (RecomendacionYaProcesadaException $e) {
-            return Redirect::back(fallback: route('cierre.index'))->with('error', $e->getMessage());
+            return Redirect::back(fallback: route('dashboard'))->with('error', $e->getMessage());
         }
 
-        return Redirect::back(fallback: route('cierre.index'))->with('status', 'recomendacion-rechazada');
+        return Redirect::back(fallback: route('dashboard'))->with('status', 'recomendacion-rechazada');
     }
 }

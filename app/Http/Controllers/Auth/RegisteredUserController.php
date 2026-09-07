@@ -46,6 +46,6 @@ class RegisteredUserController extends Controller
 
         Auth::login($user);
 
-        return redirect(route('profile.parametros.edit', absolute: false));
+        return redirect(route('calculadora.edit', absolute: false));
     }
 }

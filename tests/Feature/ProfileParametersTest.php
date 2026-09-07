@@ -7,13 +7,13 @@ test('profile parameters page is displayed', function () {
 
     $response = $this
         ->actingAs($user)
-        ->get('/profile/parametros');
+        ->get('/calculadora');
 
     $response->assertOk();
 });
 
 test('guests cannot access the profile parameters page', function () {
-    $response = $this->get('/profile/parametros');
+    $response = $this->get('/calculadora');
 
     $response->assertRedirect('/login');
 });
@@ -23,7 +23,7 @@ test('profile parameters can be updated with valid values', function () {
 
     $response = $this
         ->actingAs($user)
-        ->put('/profile/parametros', [
+        ->put('/calculadora', [
             'peso_kg' => 80.5,
             'estatura_m' => 1.78,
             'edad' => 30,
@@ -37,7 +37,7 @@ test('profile parameters can be updated with valid values', function () {
 
     $response
         ->assertSessionHasNoErrors()
-        ->assertRedirect('/profile/parametros');
+        ->assertRedirect('/calculadora');
 
     $user->refresh();
 
@@ -57,7 +57,7 @@ test('profile parameters can be updated with valid values', function () {
 test('saving the parameters derives the calorie target in force', function () {
     $user = User::factory()->create(['calorias_objetivo' => null]);
 
-    $this->actingAs($user)->put('/profile/parametros', [
+    $this->actingAs($user)->put('/calculadora', [
         'peso_kg' => 80,
         'estatura_m' => 1.75,
         'edad' => 35,
@@ -81,7 +81,7 @@ test('a profile whose macros do not fit its own calorie target is not saved', fu
 
     // 80 * 22 * 1.2 * (1 - 0.5) = 1056 kcal, pero proteína (176 g = 704 kcal) y
     // grasa (80 g = 720 kcal) ya suman 1424: carbohidratos negativos.
-    $this->actingAs($user)->put('/profile/parametros', [
+    $this->actingAs($user)->put('/calculadora', [
         'peso_kg' => 80,
         'estatura_m' => 1.75,
         'edad' => 35,
@@ -116,7 +116,7 @@ test('profile parameters fail validation when out of range', function (string $f
 
     $response = $this
         ->actingAs($user)
-        ->put('/profile/parametros', $payload);
+        ->put('/calculadora', $payload);
 
     $response->assertSessionHasErrors($field);
 })->with([

@@ -11,6 +11,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
 
+/**
+ * Sirve la "Calculadora Déficit" (rutas `calculadora.edit` / `calculadora.update`,
+ * CLAUDE.md sección 4.14). La clase conserva su nombre original para no mover
+ * el archivo en un cambio que solo renombra la sección de cara al usuario.
+ */
 class ProfileParametersController extends Controller
 {
     public function __construct(
@@ -66,6 +71,6 @@ class ProfileParametersController extends Controller
         $request->user()->calorias_objetivo = round($plan['calorias_objetivo'], 2);
         $request->user()->save();
 
-        return Redirect::route('profile.parametros.edit')->with('status', 'parametros-updated');
+        return Redirect::route('calculadora.edit')->with('status', 'parametros-updated');
     }
 }

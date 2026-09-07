@@ -5,8 +5,11 @@ use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 
 /**
+ * Cierre del día dentro del plan diario (CLAUDE.md secciones 4.5 y 4.16).
+ *
  * Same profile as tests/Unit/DailyClosureServiceTest.php:
  * objetivo = 80 * 22 * 1.5 * 0.8 = 2112 kcal, proteína objetivo = 160 g.
  */
@@ -48,6 +51,9 @@ function diaDeHoyConDesayunoRegistrado(User $usuario): RegistroDiario
     PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
         'tipo_comida' => 'almuerzo',
         'calorias_estimadas' => 845,
+        'proteina_g' => 60,
+        'grasa_g' => 25,
+        'carbohidratos_g' => 70,
     ]);
 
     ActividadFisica::factory()->for($registroDiario, 'registroDiario')->create([
@@ -63,8 +69,8 @@ function diaDeHoyConDesayunoRegistrado(User $usuario): RegistroDiario
 test('guests cannot see or trigger the daily closure', function () {
     $registroDiario = RegistroDiario::factory()->create();
 
-    $this->get(route('cierre.index'))->assertRedirect('/login');
-    $this->post(route('cierre.cerrar'))->assertRedirect('/login');
+    $this->get(route('planes.show', $registroDiario))->assertRedirect('/login');
+    $this->post(route('cierre.cerrar', $registroDiario))->assertRedirect('/login');
     $this->post(route('cierre.reabrir', $registroDiario))->assertRedirect('/login');
 });
 
@@ -72,9 +78,9 @@ test('closing the day freezes it and the summary shows the five closure points',
     $usuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
 
-    $response = $this->actingAs($usuario)->post(route('cierre.cerrar'));
+    $response = $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
 
-    $response->assertRedirect(route('cierre.index'))->assertSessionHas('status', 'dia-cerrado');
+    $response->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
 
     $registroDiario->refresh();
 
@@ -89,27 +95,27 @@ test('closing the day freezes it and the summary shows the five closure points',
         ->and((float) $registroDiario->proteina_objetivo_g)->toBe(160.0)
         ->and((float) $registroDiario->proteina_consumida_g)->toBe(45.0);
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('2,112')       // calorías objetivo
+        ->assertSee('2.112')       // calorías objetivo
         ->assertSee('600')         // calorías consumidas
         ->assertSee('340')         // gasto por actividad ajustado
-        ->assertSee('1,852')       // déficit estimado
-        ->assertSee('28.1%')       // cumplimiento de proteína
-        ->assertSee('Recomendaciones')
-        ->assertSee('No hay recomendaciones para este día.');
+        ->assertSee('1.852')       // déficit estimado
+        ->assertSee('28,1%')       // cumplimiento de proteína
+        ->assertSee('Resumen del cierre')
+        ->assertSee('Recomendaciones');
 });
 
 test('closing an already closed day is rejected without touching its figures', function () {
     $usuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
 
     $cerradoEn = $registroDiario->fresh()->cerrado_en;
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'))
-        ->assertRedirect(route('cierre.index'))
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('error');
 
     expect($registroDiario->fresh()->cerrado_en->equalTo($cerradoEn))->toBeTrue()
@@ -121,21 +127,21 @@ test('a closed day cannot receive a new comida real', function () {
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
     $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
 
     $this->actingAs($usuario)->post(route('comida-real.store', $almuerzo), [
         'calorias_reales' => 800,
         'proteina_g' => 60,
         'grasa_g' => 25,
         'carbohidratos_g' => 70,
-    ])->assertRedirect(route('cierre.index'))->assertSessionHas('error');
+    ])->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('error');
 
     expect($almuerzo->fresh()->comidaReal)->toBeNull()
         ->and((float) $registroDiario->fresh()->calorias_consumidas)->toBe(600.0);
 
     // The form is closed too, not just the write endpoint.
     $this->actingAs($usuario)->get(route('comida-real.create', $almuerzo))
-        ->assertRedirect(route('cierre.index'))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('error');
 });
 
@@ -143,14 +149,14 @@ test('a closed day cannot receive a new actividad fisica either', function () {
     $usuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
 
-    $this->actingAs($usuario)->post(route('actividades.store'), [
+    $this->actingAs($usuario)->post(route('actividades.store', $registroDiario), [
         'tipo_actividad' => 'trote',
         'duracion_min' => 30,
         'calorias_dispositivo' => 300,
         'fuente' => 'dispositivo',
-    ])->assertRedirect(route('cierre.index'))->assertSessionHas('error');
+    ])->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('error');
 
     expect($registroDiario->fresh()->actividadesFisicas()->count())->toBe(1)
         ->and((float) $registroDiario->fresh()->calorias_actividad_ajustada)->toBe(340.0);
@@ -161,10 +167,10 @@ test('after an explicit reopen the day accepts a comida real again', function ()
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
     $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
 
     $this->actingAs($usuario)->post(route('cierre.reabrir', $registroDiario))
-        ->assertRedirect(route('cierre.index'))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('status', 'dia-reabierto');
 
     expect($registroDiario->fresh()->cerrado)->toBeFalse();
@@ -174,18 +180,20 @@ test('after an explicit reopen the day accepts a comida real again', function ()
         'proteina_g' => 60,
         'grasa_g' => 25,
         'carbohidratos_g' => 70,
-    ])->assertRedirect(route('planes.index'));
+    ])->assertRedirect(route('planes.show', $registroDiario));
 
     expect($almuerzo->fresh()->comidaReal)->not->toBeNull()
         ->and((float) $registroDiario->fresh()->calorias_consumidas)->toBe(1400.0);
 });
 
-test('a user cannot reopen another users day', function () {
+test('a user cannot close or reopen another users day', function () {
     $usuario = usuarioParaCierre();
     $otroUsuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($otroUsuario);
 
-    $this->actingAs($otroUsuario)->post(route('cierre.cerrar'));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))->assertForbidden();
+
+    $this->actingAs($otroUsuario)->post(route('cierre.cerrar', $registroDiario));
 
     $this->actingAs($usuario)->post(route('cierre.reabrir', $registroDiario))->assertForbidden();
 
@@ -196,26 +204,145 @@ test('closing the day requires the nutritional profile to be complete', function
     $usuario = usuarioParaCierre(['proteina_factor' => null]);
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'))
-        ->assertRedirect(route('profile.parametros.edit'))
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))
+        ->assertRedirect(route('calculadora.edit'))
         ->assertSessionHas('error');
 
     expect($registroDiario->fresh()->cerrado)->toBeFalse();
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('Completa tus parámetros nutricionales para poder cerrar el día.');
+        ->assertSee('Completa tu Calculadora Déficit');
 });
 
 test('the summary of an open day is a preview that does not close it', function () {
     $usuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('Resumen previo (todavía sin cerrar)')
-        ->assertSee('1,852');
+        ->assertSee('Vista previa (todavía sin cerrar)')
+        ->assertSee('1.852');
 
     expect($registroDiario->fresh()->cerrado)->toBeFalse()
         ->and($registroDiario->fresh()->deficit_diario)->toBeNull();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Feedback de cumplimiento (CLAUDE.md sección 4.16)
+|--------------------------------------------------------------------------
+*/
+
+test('the closure form asks whether each planned meal was fulfilled', function () {
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('¿Cumpliste con lo sugerido?')
+        ->assertSee('Sí, comí lo que se sugirió')
+        // El desayuno ya está registrado: no se vuelve a preguntar por él.
+        ->assertSee('feedback[almuerzo][texto]', escape: false)
+        ->assertDontSee('feedback[desayuno][texto]', escape: false);
+});
+
+test('marking a meal as fulfilled registers it with the planned macros', function () {
+    Http::fake();
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+    $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => ['cumplio' => '1']],
+    ])->assertSessionHas('status', 'dia-cerrado');
+
+    $comidaReal = $almuerzo->fresh()->comidaReal;
+
+    expect($comidaReal)->not->toBeNull()
+        ->and((float) $comidaReal->calorias_reales)->toBe(845.0)
+        ->and((float) $comidaReal->proteina_g)->toBe(60.0);
+
+    // 600 del desayuno + 845 del almuerzo confirmado.
+    expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(1445.0);
+
+    // Confirmar con la casilla no cuesta ninguna llamada al proveedor.
+    Http::assertNothingSent();
+});
+
+test('describing what was actually eaten is interpreted by the AI and consolidated into the closure', function () {
+    config([
+        'services.anthropic.key' => 'clave-de-prueba',
+        'services.anthropic.model' => 'claude-haiku-4-5',
+        'services.anthropic.endpoint' => 'https://api.anthropic.com/v1/messages',
+    ]);
+
+    Http::fake(['api.anthropic.com/*' => Http::response([
+        'stop_reason' => 'end_turn',
+        'content' => [['type' => 'text', 'text' => json_encode(['comidas' => [[
+            'tipo_comida' => 'almuerzo',
+            'descripcion' => 'Sándwich de pollo y gaseosa',
+            'preparacion' => '',
+            'notas' => 'Asumí una lata de 350 ml.',
+            'ingredientes' => [
+                ['nombre' => 'Sándwich de pollo', 'porcion' => '1 unidad', 'cantidad_g' => 220, 'calorias' => 480, 'proteina_g' => 28, 'grasa_g' => 18, 'carbohidratos_g' => 50],
+                ['nombre' => 'Gaseosa', 'porcion' => '1 lata', 'cantidad_g' => 350, 'calorias' => 140, 'proteina_g' => 0, 'grasa_g' => 0, 'carbohidratos_g' => 37],
+            ],
+        ]]])]],
+    ])]);
+
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+    $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => ['texto' => 'al final me comí un sándwich de pollo y una gaseosa']],
+    ])->assertSessionHas('status', 'dia-cerrado');
+
+    $comidaReal = $almuerzo->fresh()->comidaReal;
+
+    // 480 + 140 = 620 kcal, sumados en PHP a partir de los ingredientes.
+    expect($comidaReal)->not->toBeNull()
+        ->and((float) $comidaReal->calorias_reales)->toBe(620.0)
+        ->and((float) $comidaReal->proteina_g)->toBe(28.0)
+        ->and($comidaReal->notas)->toContain('sándwich de pollo');
+
+    // 600 del desayuno + 620 del almuerzo real: es lo que congela el cierre.
+    expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(1220.0)
+        ->and((float) $registroDiario->fresh()->deficit_diario)->toBe(2112.0 - 1220.0 + 340.0);
+});
+
+test('a provider failure during the closure feedback leaves the day open instead of half closed', function () {
+    config([
+        'services.anthropic.key' => 'clave-de-prueba',
+        'services.anthropic.endpoint' => 'https://api.anthropic.com/v1/messages',
+    ]);
+
+    Http::fake(['api.anthropic.com/*' => Http::response(['error' => ['type' => 'overloaded_error']], 529)]);
+
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+    $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => ['cumplio' => '1', 'texto' => 'no me acuerdo bien']],
+    ])
+        ->assertRedirect(route('planes.show', $registroDiario))
+        ->assertSessionHas('error');
+
+    expect($registroDiario->fresh()->cerrado)->toBeFalse()
+        ->and($almuerzo->fresh()->comidaReal)->toBeNull();
+});
+
+test('closing without any feedback still works and leaves the unlogged meals out', function () {
+    Http::fake();
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))
+        ->assertSessionHas('status', 'dia-cerrado');
+
+    expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(600.0);
+
+    Http::assertNothingSent();
 });

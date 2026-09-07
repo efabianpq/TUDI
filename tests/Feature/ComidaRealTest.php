@@ -75,7 +75,7 @@ test('logging a comida real updates calorias_consumidas on the registro diario',
         'carbohidratos_g' => 60,
     ]);
 
-    $response->assertRedirect(route('planes.index'))->assertSessionHas('status', 'comida-real-guardada');
+    $response->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('status', 'comida-real-guardada');
 
     expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(550.0);
 

@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'registro_diario_id',
     'tipo_comida',
     'descripcion',
+    'preparacion',
+    'notas_ia',
     'ingredientes_detalle',
     'calorias_estimadas',
     'proteina_g',

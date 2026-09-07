@@ -4,6 +4,10 @@ use App\Models\RegistroDiario;
 use App\Models\User;
 use App\Services\ActivityCorrectionService;
 
+/**
+ * La actividad física se registra dentro de un plan diario concreto (CLAUDE.md
+ * sección 4.13): ya no hay una pantalla suelta que asuma "hoy".
+ */
 function actividadPayload(array $overrides = []): array
 {
     return array_merge([
@@ -15,22 +19,30 @@ function actividadPayload(array $overrides = []): array
     ], $overrides);
 }
 
-test('guests cannot access the actividades form', function () {
-    $response = $this->get('/actividades');
+function planDeHoyDe(User $usuario, array $overrides = []): RegistroDiario
+{
+    return RegistroDiario::factory()->for($usuario, 'usuario')->create(array_merge([
+        'fecha' => now()->toDateString(),
+    ], $overrides));
+}
 
-    $response->assertRedirect('/login');
+test('guests cannot register an activity', function () {
+    $registroDiario = planDeHoyDe(User::factory()->create());
+
+    $this->post(route('actividades.store', $registroDiario), actividadPayload())
+        ->assertRedirect('/login');
 });
 
 test('registering an activity applies the correction factor for its tipo', function () {
     $user = User::factory()->create();
+    $registroDiario = planDeHoyDe($user);
 
     $response = $this
         ->actingAs($user)
-        ->post('/actividades', actividadPayload());
+        ->post(route('actividades.store', $registroDiario), actividadPayload());
 
-    $response->assertSessionHasNoErrors()->assertRedirect(route('actividades.create'));
+    $response->assertSessionHasNoErrors()->assertRedirect(route('planes.show', $registroDiario));
 
-    $registroDiario = RegistroDiario::where('usuario_id', $user->id)->first();
     $actividad = $registroDiario->actividadesFisicas()->first();
 
     expect((float) $actividad->factor_correccion)->toBe(ActivityCorrectionService::FACTORES_POR_TIPO['pesas'])
@@ -39,31 +51,26 @@ test('registering an activity applies the correction factor for its tipo', funct
         ->and($actividad->fuente)->toBe('dispositivo');
 });
 
-test('registering an activity creates the registro diario for today if it does not exist', function () {
-    $user = User::factory()->create();
+test('a user cannot register an activity on another users plan', function () {
+    $registroDiario = planDeHoyDe(User::factory()->create());
 
-    expect(RegistroDiario::where('usuario_id', $user->id)->exists())->toBeFalse();
+    $this->actingAs(User::factory()->create())
+        ->post(route('actividades.store', $registroDiario), actividadPayload())
+        ->assertForbidden();
 
-    $this->actingAs($user)->post('/actividades', actividadPayload());
-
-    $registroDiario = RegistroDiario::where('usuario_id', $user->id)->first();
-
-    expect($registroDiario)->not->toBeNull()
-        ->and($registroDiario->fecha->toDateString())->toBe(now()->toDateString());
+    expect($registroDiario->actividadesFisicas()->count())->toBe(0);
 });
 
 test('the registro diario sums the adjusted calories of several activities in the same day', function () {
     $user = User::factory()->create();
-    $registroDiario = RegistroDiario::factory()->for($user, 'usuario')->create([
-        'fecha' => now()->toDateString(),
-    ]);
+    $registroDiario = planDeHoyDe($user);
 
-    $this->actingAs($user)->post('/actividades', actividadPayload([
+    $this->actingAs($user)->post(route('actividades.store', $registroDiario), actividadPayload([
         'tipo_actividad' => 'pesas',
         'calorias_dispositivo' => 400,
     ]));
 
-    $this->actingAs($user)->post('/actividades', actividadPayload([
+    $this->actingAs($user)->post(route('actividades.store', $registroDiario), actividadPayload([
         'tipo_actividad' => 'caminata',
         'calorias_dispositivo' => 300,
     ]));
@@ -77,22 +84,24 @@ test('the registro diario sums the adjusted calories of several activities in th
 
 test('a duracion_min of zero fails validation', function () {
     $user = User::factory()->create();
+    $registroDiario = planDeHoyDe($user);
 
     $response = $this
         ->actingAs($user)
-        ->post('/actividades', actividadPayload(['duracion_min' => 0]));
+        ->post(route('actividades.store', $registroDiario), actividadPayload(['duracion_min' => 0]));
 
     $response->assertSessionHasErrors('duracion_min');
 
-    expect(RegistroDiario::where('usuario_id', $user->id)->exists())->toBeFalse();
+    expect($registroDiario->actividadesFisicas()->count())->toBe(0);
 });
 
 test('an unknown fuente fails validation', function () {
     $user = User::factory()->create();
+    $registroDiario = planDeHoyDe($user);
 
     $response = $this
         ->actingAs($user)
-        ->post('/actividades', actividadPayload(['fuente' => 'estimacion']));
+        ->post(route('actividades.store', $registroDiario), actividadPayload(['fuente' => 'estimacion']));
 
     $response->assertSessionHasErrors('fuente');
 });

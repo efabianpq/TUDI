@@ -74,8 +74,7 @@ class NutritionCalculatorService
         $this->assertInRange('proteina_factor', $proteinaFactor, self::PROTEINA_FACTOR_MIN, self::PROTEINA_FACTOR_MAX);
         $this->assertInRange('grasa_factor', $grasaFactor, self::GRASA_FACTOR_MIN, self::GRASA_FACTOR_MAX);
 
-        $tmb = $pesoKg * self::TMB_FACTOR;
-        $caloriasMantenimiento = $tmb * $nivelActividad;
+        $caloriasMantenimiento = $this->calculateMaintenanceCalories($pesoKg, $nivelActividad);
 
         $caloriasObjetivo = $caloriasObjetivoVigente ?? match ($tipoDeficit) {
             self::TIPO_DEFICIT_PORCENTAJE => $caloriasMantenimiento * (1 - $valorDeficit),
@@ -106,6 +105,18 @@ class NutritionCalculatorService
             'grasa_g' => $grasaG,
             'carbohidratos_g' => $carbohidratosKcal / self::KCAL_POR_GRAMO_CARBOHIDRATO,
         ];
+    }
+
+    /**
+     * calorias_mantenimiento = (peso_kg * 22) * nivel_actividad.
+     *
+     * Público para que ActivitySuggestionService pueda dimensionar el déficit
+     * del día (mantenimiento − objetivo vigente) sin reimplementar la fórmula
+     * de la sección 5 — este servicio sigue siendo su única fuente de verdad.
+     */
+    public function calculateMaintenanceCalories(float $pesoKg, float $nivelActividad): float
+    {
+        return $pesoKg * self::TMB_FACTOR * $nivelActividad;
     }
 
     /**

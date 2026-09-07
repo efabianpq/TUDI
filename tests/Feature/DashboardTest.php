@@ -8,6 +8,10 @@ use App\Models\RegistroDiario;
 use App\Models\User;
 
 /**
+ * Inicio: la pantalla que fusiona el antiguo dashboard con "Mi progreso"
+ * (CLAUDE.md sección 4.17). Tres alturas de mirada: hoy, la tendencia de 7
+ * días, y el seguimiento semanal con el historial de ajustes.
+ *
  * Same profile as tests/Feature/CierreDiarioTest.php:
  * objetivo = 80 * 22 * 1.5 * 0.8 = 2112 kcal.
  */
@@ -26,7 +30,7 @@ function usuarioParaDashboard(array $sobrescribir = []): User
     ], $sobrescribir));
 }
 
-it('exige autenticación para ver el dashboard', function () {
+it('exige autenticación para ver el inicio', function () {
     $this->get(route('dashboard'))->assertRedirect(route('login'));
 });
 
@@ -72,19 +76,94 @@ it('muestra el resumen de hoy, el estado de las comidas, las tendencias y las re
 
     // objetivo 2112 · consumidas 600 · actividad 340 · déficit 2112-600+340 = 1852
     $respuesta->assertOk()
-        ->assertSee('2,112')   // calorías objetivo
+        ->assertSee('2.112')   // calorías objetivo
         ->assertSee('600')     // calorías consumidas
         ->assertSee('340')     // gasto por actividad ajustado
-        ->assertSee('1,852')   // déficit estimado
-        ->assertSee('Desayuno: registrada')
-        ->assertSee('Almuerzo: planificada')
-        ->assertSee('Cena: pendiente')
+        ->assertSee('1.852')   // déficit estimado
+        ->assertSee('desayuno')
+        ->assertSee('almuerzo')
+        ->assertSee('registrada')
+        ->assertSee('planificada')
+        ->assertSee('pendiente')
+        ->assertSee('Abrir el plan de hoy')
         ->assertSee($recomendacion->justificacion)
-        ->assertSee('grafico-peso-dashboard')
+        ->assertSee('grafico-peso')
         ->assertSee('chart.js', false);
 });
 
-it('confirmar una recomendación desde el dashboard vuelve al dashboard', function () {
+it('absorbe lo que antes era "Mi progreso": promedios móviles, consistencia y gráfico', function () {
+    $usuario = usuarioParaDashboard();
+
+    // Siete días cerrados con peso y déficit conocidos.
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+            'peso_kg' => 80.0,
+            'deficit_diario' => 500,
+            'calorias_consumidas' => 1800,
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Peso (promedio móvil 7 días)')
+        ->assertSee('80,00 kg')
+        ->assertSee('Déficit promedio (7 días)')
+        ->assertSee('Índice de consistencia')
+        ->assertSee('100%')
+        ->assertSee('7 de 7 días cerrados');
+});
+
+it('resume el seguimiento semana a semana a partir de los planes diarios', function () {
+    $usuario = usuarioParaDashboard();
+
+    // Semana actual: 80.0 kg de media. Semana anterior: 81.0 kg.
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+            'peso_kg' => 80.0,
+            'deficit_diario' => 500,
+        ]);
+    }
+
+    foreach (range(7, 13) as $dias) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+            'peso_kg' => 81.0,
+            'deficit_diario' => 400,
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Tu seguimiento')
+        ->assertSee('Adherencia')
+        ->assertSee('80,00 kg')
+        ->assertSee('81,00 kg')
+        // Perdió 1 kg de media respecto de la semana anterior.
+        ->assertSee('-1,00 kg');
+});
+
+it('muestra el historial de ajustes propuestos y su estado', function () {
+    $usuario = usuarioParaDashboard();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDays(3)->toDateString(),
+    ]);
+
+    RecomendacionSistema::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo' => 'ajuste_calorico',
+        'justificacion' => 'Ajuste ya confirmado la semana pasada.',
+        'estado' => 'confirmada',
+    ]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Historial')
+        ->assertSee('Ajuste ya confirmado la semana pasada.')
+        ->assertSee('confirmada');
+});
+
+it('confirmar una recomendación desde el inicio vuelve al inicio', function () {
     $usuario = usuarioParaDashboard();
     $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create();
 
@@ -117,8 +196,8 @@ it('no falla para un usuario sin nada registrado hoy', function () {
 
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
-        ->assertSee('Todavía no hay nada registrado hoy.')
-        ->assertSee('No tienes recomendaciones pendientes de confirmar.');
+        ->assertSee('Todavía no has creado el plan de hoy.')
+        ->assertSee('No tienes recomendaciones pendientes.');
 });
 
 it('no mezcla las recomendaciones o el resumen de otro usuario', function () {
@@ -137,4 +216,10 @@ it('no mezcla las recomendaciones o el resumen de otro usuario', function () {
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
         ->assertDontSee('Recomendación del otro usuario');
+});
+
+it('redirige "Mi progreso" al inicio para no romper enlaces guardados', function () {
+    $usuario = usuarioParaDashboard();
+
+    $this->actingAs($usuario)->get(route('progreso.index'))->assertRedirect(route('dashboard'));
 });

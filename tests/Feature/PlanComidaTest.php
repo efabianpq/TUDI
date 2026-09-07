@@ -7,6 +7,12 @@ use App\Services\MealPlanGeneratorService;
 use App\Services\NutritionCalculatorService;
 
 /**
+ * Generación heurística del plan a partir de los IngredienteDisponible
+ * reportados (CLAUDE.md sección 4.2). Ya no está enlazada desde la interfaz,
+ * pero sigue siendo un camino válido sobre un plan diario concreto.
+ */
+
+/**
  * A user whose nutritional parameters are already filled in, so
  * NutritionCalculatorService can produce a target for them.
  */
@@ -56,17 +62,20 @@ function registroDeHoyCon(User $usuario, bool $conIngredientes = true): Registro
 }
 
 test('guests cannot see or generate the plan', function () {
+    $registroDiario = registroDeHoyCon(usuarioConParametros(), conIngredientes: false);
+
     $this->get(route('planes.index'))->assertRedirect('/login');
-    $this->post(route('planes.generar'))->assertRedirect('/login');
+    $this->get(route('planes.show', $registroDiario))->assertRedirect('/login');
+    $this->post(route('planes.generar', $registroDiario))->assertRedirect('/login');
 });
 
 test('generating the plan creates the three meals of the day', function () {
     $usuario = usuarioConParametros();
     $registroDiario = registroDeHoyCon($usuario);
 
-    $response = $this->actingAs($usuario)->post(route('planes.generar'));
+    $response = $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
 
-    $response->assertRedirect(route('planes.index'))->assertSessionHas('status', 'plan-generado');
+    $response->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('status', 'plan-generado');
 
     $planes = $registroDiario->planesComida()->orderBy('id')->get();
 
@@ -77,11 +86,11 @@ test('generating the plan creates the three meals of the day', function () {
 
 test('the generated plan is shown on the plan page', function () {
     $usuario = usuarioConParametros();
-    registroDeHoyCon($usuario);
+    $registroDiario = registroDeHoyCon($usuario);
 
-    $this->actingAs($usuario)->post(route('planes.generar'));
+    $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
 
-    $response = $this->actingAs($usuario)->get(route('planes.index'));
+    $response = $this->actingAs($usuario)->get(route('planes.show', $registroDiario));
 
     $response->assertOk()
         ->assertSee('desayuno')
@@ -90,61 +99,49 @@ test('the generated plan is shown on the plan page', function () {
         ->assertSee('Pechuga de pollo');
 });
 
-test('generating the plan without any registro diario for today fails in a controlled way', function () {
-    $usuario = usuarioConParametros();
-
-    $response = $this->actingAs($usuario)->post(route('planes.generar'));
-
-    $response->assertRedirect(route('ingredientes.create'))->assertSessionHas('error');
-
-    expect($usuario->registrosDiarios()->count())->toBe(0);
-});
-
 test('generating the plan with no reported ingredients fails in a controlled way, not with a 500', function () {
     $usuario = usuarioConParametros();
     $registroDiario = registroDeHoyCon($usuario, conIngredientes: false);
 
-    $response = $this->actingAs($usuario)->post(route('planes.generar'));
+    $response = $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
 
-    $response->assertRedirect(route('ingredientes.create'))->assertSessionHas('error');
+    $response->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('error');
 
     expect($registroDiario->planesComida()->count())->toBe(0);
 });
 
 test('generating the plan without nutritional parameters redirects to the profile form', function () {
     $usuario = usuarioConParametros(['peso_kg' => null]);
-    registroDeHoyCon($usuario);
+    $registroDiario = registroDeHoyCon($usuario);
 
-    $response = $this->actingAs($usuario)->post(route('planes.generar'));
+    $response = $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
 
-    $response->assertRedirect(route('profile.parametros.edit'))->assertSessionHas('error');
+    $response->assertRedirect(route('calculadora.edit'))->assertSessionHas('error');
 });
 
-test('the plan is built only from the authenticated users ingredients', function () {
-    $usuario = usuarioConParametros();
-    $otroUsuario = usuarioConParametros();
-    registroDeHoyCon($otroUsuario);
+test('a user cannot generate the plan of another users day', function () {
+    $registroDiario = registroDeHoyCon(usuarioConParametros());
 
-    // El otro usuario sí tiene ingredientes hoy, pero el usuario autenticado no:
-    // su plan no debe generarse con la despensa ajena.
-    $response = $this->actingAs($usuario)->post(route('planes.generar'));
+    $this->actingAs(usuarioConParametros())
+        ->post(route('planes.generar', $registroDiario))
+        ->assertForbidden();
 
-    $response->assertRedirect(route('ingredientes.create'))->assertSessionHas('error');
+    expect($registroDiario->planesComida()->count())->toBe(0);
 });
 
-test('the plan page is reachable before any plan exists', function () {
+test('the plan list is reachable before any plan exists', function () {
     $usuario = usuarioConParametros();
 
     $response = $this->actingAs($usuario)->get(route('planes.index'));
 
-    $response->assertOk()->assertSee('Generar mi plan de hoy');
+    $response->assertOk()->assertSee('Crear plan diario');
 });
 
 test('the whole day adds up to roughly the calorie target', function () {
     $usuario = usuarioConParametros();
     $registroDiario = registroDeHoyCon($usuario);
 
-    $this->actingAs($usuario)->post(route('planes.generar'));
+    $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
 
     $objetivo = app(NutritionCalculatorService::class)->calculatePlan(
         80.0,

@@ -43,6 +43,16 @@ const OBJETIVO_KCAL_FLUJO_DIARIO = 2112.0;
 const PROTEINA_OBJETIVO_FLUJO_DIARIO = 160.0;
 
 /**
+ * Las vistas formatean las kcal con separador de miles "." y decimal ","
+ * (locale es), así que las aserciones sobre el HTML tienen que usar el mismo
+ * formato que la vista, no `number_format()` a secas.
+ */
+function kcalDelFlujoDiario(float $valor): string
+{
+    return number_format($valor, 0, ',', '.');
+}
+
+/**
  * Despensa con holgura suficiente (6325 kcal y 399 g de proteína disponibles
  * para un objetivo de 2112 kcal / 160 g) para que el reparto codicioso de la
  * sección 4.2 no se quede corto por falta de inventario.
@@ -75,7 +85,7 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         'email' => 'ana@example.com',
         'password' => 'password',
         'password_confirmation' => 'password',
-    ])->assertRedirect(route('profile.parametros.edit', absolute: false));
+    ])->assertRedirect(route('calculadora.edit', absolute: false));
 
     $this->assertAuthenticated();
 
@@ -87,8 +97,8 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         ->and($usuario->calorias_objetivo)->toBeNull();
 
     $this->actingAs($usuario)
-        ->put(route('profile.parametros.update'), perfilDelFlujoDiario())
-        ->assertRedirect(route('profile.parametros.edit'))
+        ->put(route('calculadora.update'), perfilDelFlujoDiario())
+        ->assertRedirect(route('calculadora.edit'))
         ->assertSessionHasNoErrors();
 
     $usuario->refresh();
@@ -120,8 +130,8 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     // ── Paso 3: generación del plan de comidas ──────────────────────────────
     $this->actingAs($usuario)
-        ->post(route('planes.generar'))
-        ->assertRedirect(route('planes.index'))
+        ->post(route('planes.generar', $registroDiario))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('status', 'plan-generado');
 
     $planes = $registroDiario->planesComida()->orderBy('id')->get();
@@ -167,7 +177,7 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     $this->actingAs($usuario)
         ->post(route('comida-real.store', $desayuno), $comidaRealDesayuno)
-        ->assertRedirect(route('planes.index'))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('status', 'comida-real-guardada');
 
     expect(ComidaReal::where('plan_comida_id', $desayuno->id)->count())->toBe(1);
@@ -191,20 +201,20 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     // ── Paso 5: actividad física ────────────────────────────────────────────
     // caminata → factor 0.85 · 400 = 340 kcal; pesas → factor 0.80 · 200 = 160 kcal.
-    $this->actingAs($usuario)->post(route('actividades.store'), [
+    $this->actingAs($usuario)->post(route('actividades.store', $registroDiario), [
         'tipo_actividad' => 'caminata',
         'duracion_min' => 45,
         'calorias_dispositivo' => 400,
         'pasos' => 6200,
         'fuente' => 'dispositivo',
-    ])->assertRedirect(route('actividades.create'))->assertSessionHas('status', 'actividad-guardada');
+    ])->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('status', 'actividad-guardada');
 
-    $this->actingAs($usuario)->post(route('actividades.store'), [
+    $this->actingAs($usuario)->post(route('actividades.store', $registroDiario), [
         'tipo_actividad' => 'pesas',
         'duracion_min' => 50,
         'calorias_dispositivo' => 200,
         'fuente' => 'dispositivo',
-    ])->assertRedirect(route('actividades.create'));
+    ])->assertRedirect(route('planes.show', $registroDiario));
 
     $actividades = ActividadFisica::where('registro_diario_id', $registroDiario->id)
         ->orderBy('id')
@@ -221,8 +231,8 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     // ── Paso 6: cierre del día ──────────────────────────────────────────────
     $this->actingAs($usuario)
-        ->post(route('cierre.cerrar'))
-        ->assertRedirect(route('cierre.index'))
+        ->post(route('cierre.cerrar', $registroDiario))
+        ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('status', 'dia-cerrado');
 
     $registroDiario->refresh();
@@ -247,14 +257,14 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     $cumplimientoProteina = $comidaRealDesayuno['proteina_g'] / PROTEINA_OBJETIVO_FLUJO_DIARIO * 100;
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
         ->assertSee('Resumen del cierre')
-        ->assertSee(number_format(OBJETIVO_KCAL_FLUJO_DIARIO, 0))
-        ->assertSee(number_format($caloriasConsumidas, 0))
-        ->assertSee(number_format($caloriasActividad, 0))
-        ->assertSee(number_format($deficitEsperado, 0))
-        ->assertSee(number_format($cumplimientoProteina, 1).'%');
+        ->assertSee(kcalDelFlujoDiario(OBJETIVO_KCAL_FLUJO_DIARIO))
+        ->assertSee(kcalDelFlujoDiario($caloriasConsumidas))
+        ->assertSee(kcalDelFlujoDiario($caloriasActividad))
+        ->assertSee(kcalDelFlujoDiario($deficitEsperado))
+        ->assertSee(number_format($cumplimientoProteina, 1, ',', '.').'%');
 
     // ── Paso 7: recomendaciones del sistema ─────────────────────────────────
     // Con un solo día de historial no corresponde ninguna: la sección 6 prohíbe
@@ -264,8 +274,8 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         // Y el objetivo vigente sigue intacto: nada lo ajusta automáticamente.
         ->and((float) $usuario->fresh()->calorias_objetivo)->toBe(OBJETIVO_KCAL_FLUJO_DIARIO);
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
-        ->assertSee('No hay recomendaciones para este día.');
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertSee('Sin recomendaciones para este día.');
 });
 
 test('un ajuste calórico confirmado pasa a dimensionar el plan y el cierre', function () {
@@ -297,11 +307,13 @@ test('un ajuste calórico confirmado pasa a dimensionar el plan y el cierre', fu
     // El plan de hoy se dimensiona contra el objetivo vigente, no contra los
     // 2112 kcal que sigue dando la fórmula cruda del perfil.
     $this->actingAs($usuario)->post(route('ingredientes.store'), ['ingredientes' => despensaDelFlujoDiario()]);
-    $this->actingAs($usuario)->post(route('planes.generar'))->assertSessionHas('status', 'plan-generado');
 
     $registroDiario = RegistroDiario::where('usuario_id', $usuario->id)
         ->whereDate('fecha', now()->toDateString())
         ->firstOrFail();
+
+    $this->actingAs($usuario)->post(route('planes.generar', $registroDiario))
+        ->assertSessionHas('status', 'plan-generado');
 
     $totalPlanificado = (float) $registroDiario->planesComida()->get()
         ->sum(fn (PlanComida $plan) => (float) $plan->calorias_estimadas);
@@ -310,7 +322,7 @@ test('un ajuste calórico confirmado pasa a dimensionar el plan y el cierre', fu
         ->and($totalPlanificado)->toBeLessThan(OBJETIVO_KCAL_FLUJO_DIARIO);
 
     // Y el cierre congela ese mismo objetivo vigente.
-    $this->actingAs($usuario)->post(route('cierre.cerrar'))->assertSessionHas('status', 'dia-cerrado');
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
 
     expect((float) $registroDiario->fresh()->calorias_objetivo_dia)->toBe(1962.0);
 });
@@ -319,9 +331,11 @@ test('el día cerrado queda congelado y su resumen ya no depende del perfil', fu
     $usuario = User::factory()->create(perfilDelFlujoDiario());
 
     $this->actingAs($usuario)->post(route('ingredientes.store'), ['ingredientes' => despensaDelFlujoDiario()]);
-    $this->actingAs($usuario)->post(route('planes.generar'));
 
     $registroDiario = RegistroDiario::where('usuario_id', $usuario->id)->firstOrFail();
+
+    $this->actingAs($usuario)->post(route('planes.generar', $registroDiario));
+
     $desayuno = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->firstOrFail();
 
     $this->actingAs($usuario)->post(route('comida-real.store', $desayuno), [
@@ -331,14 +345,14 @@ test('el día cerrado queda congelado y su resumen ya no depende del perfil', fu
         'carbohidratos_g' => 55,
     ]);
 
-    $this->actingAs($usuario)->post(route('actividades.store'), [
+    $this->actingAs($usuario)->post(route('actividades.store', $registroDiario), [
         'tipo_actividad' => 'caminata',
         'duracion_min' => 45,
         'calorias_dispositivo' => 400,
         'fuente' => 'dispositivo',
     ]);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar'))->assertSessionHas('status', 'dia-cerrado');
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
 
     // deficit = 2112 - 600 + 340 = 1852
     expect((float) $registroDiario->fresh()->deficit_diario)->toBe(1852.0);
@@ -351,14 +365,14 @@ test('el día cerrado queda congelado y su resumen ya no depende del perfil', fu
         'proteina_g' => 60,
         'grasa_g' => 25,
         'carbohidratos_g' => 70,
-    ])->assertRedirect(route('cierre.index'))->assertSessionHas('error');
+    ])->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('error');
 
     // Cambiar el perfil después no reescribe la historia: el resumen de un día
     // cerrado se lee del snapshot persistido, no se recalcula.
     $usuario->update(['peso_kg' => 90]);
 
-    $this->actingAs($usuario)->get(route('cierre.index'))
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee(number_format(OBJETIVO_KCAL_FLUJO_DIARIO, 0))
-        ->assertSee('1,852');
+        ->assertSee(kcalDelFlujoDiario(OBJETIVO_KCAL_FLUJO_DIARIO))
+        ->assertSee('1.852');
 });

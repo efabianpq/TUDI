@@ -15,5 +15,5 @@ test('new users can register', function () {
     ]);
 
     $this->assertAuthenticated();
-    $response->assertRedirect(route('profile.parametros.edit', absolute: false));
+    $response->assertRedirect(route('calculadora.edit', absolute: false));
 });

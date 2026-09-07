@@ -31,6 +31,12 @@ php artisan key:generate
 # Editar .env con los datos reales de MySQL (ver hPanel → Bases de datos),
 # APP_ENV=production, APP_DEBUG=false, APP_URL=https://tu-dominio,
 # y APP_TIMEZONE con la zona horaria del mercado objetivo (ver CLAUDE.md sección 7).
+#
+# ANTHROPIC_API_KEY: clave de la API de Claude (console.anthropic.com).
+# La usa "Generar distribución" en "Plan de hoy" (CLAUDE.md sección 4.12).
+# Sin ella el resto de la aplicación funciona igual y ese botón muestra un
+# mensaje pidiendo configurarla. Requiere salida HTTPS a api.anthropic.com:
+# si el plan de hosting bloquea las conexiones salientes, hay que habilitarla.
 
 php artisan migrate --force
 php artisan storage:link

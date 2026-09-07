@@ -52,7 +52,7 @@ it('confirmar una recomendación de ajuste calórico actualiza calorias_objetivo
 
     $this->actingAs($usuario)
         ->post(route('recomendaciones.confirmar', $recomendacion))
-        ->assertRedirect(route('cierre.index'));
+        ->assertRedirect(route('dashboard'));
 
     expect((float) $usuario->fresh()->calorias_objetivo)->toEqualWithDelta(1850.0, 0.01);
     expect($recomendacion->fresh()->estado)->toBe('confirmada');
@@ -64,7 +64,7 @@ it('rechazar una recomendación no modifica calorias_objetivo del usuario', func
 
     $this->actingAs($usuario)
         ->post(route('recomendaciones.rechazar', $recomendacion))
-        ->assertRedirect(route('cierre.index'));
+        ->assertRedirect(route('dashboard'));
 
     expect((float) $usuario->fresh()->calorias_objetivo)->toEqualWithDelta(2000.0, 0.01);
     expect($recomendacion->fresh()->estado)->toBe('rechazada');
@@ -78,7 +78,7 @@ it('no permite confirmar una recomendación que ya fue rechazada', function () {
 
     $this->actingAs($usuario)
         ->post(route('recomendaciones.confirmar', $recomendacion))
-        ->assertRedirect(route('cierre.index'))
+        ->assertRedirect(route('dashboard'))
         ->assertSessionHas('error');
 
     expect((float) $usuario->fresh()->calorias_objetivo)->toEqualWithDelta(2000.0, 0.01);

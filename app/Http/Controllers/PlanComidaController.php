@@ -3,74 +3,207 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\InvalidNutritionParameterException;
+use App\Exceptions\MealDistributionUnavailableException;
 use App\Exceptions\NegativeCarbohydrateException;
 use App\Exceptions\NoIngredientsAvailableException;
+use App\Http\Requests\DistribucionDiaRequest;
+use App\Http\Requests\RegistroPesoRequest;
 use App\Models\RegistroDiario;
+use App\Services\ActivitySuggestionService;
+use App\Services\DailyClosureService;
+use App\Services\MealDistributionService;
 use App\Services\MealPlanGeneratorService;
 use App\Services\NutritionCalculatorService;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
 
+/**
+ * "Planes diarios" (CLAUDE.md sección 4.12): el histórico de días del usuario y
+ * el detalle de cada uno.
+ *
+ *  - `index()` — el listado de todos los planes diarios, con el estado de cada
+ *    día, y el botón para crear el de hoy si todavía no existe.
+ *  - `show()` — un plan diario concreto, que es donde transcurre el día:
+ *      1. Cálculo alimenticio — el texto libre de las tres comidas y su
+ *         distribución generada con IA en una sola pasada (MealDistributionService).
+ *      2. Actividad física — la sugerencia derivada de la Calculadora Déficit
+ *         (ActivitySuggestionService) y el registro de lo que se hizo.
+ *      3. Cierre del día — el feedback de cumplimiento y el resumen
+ *         (DailyClosureService + CierreFeedbackService, vía CierreDiarioController).
+ *
+ * La clase conserva su nombre aunque la sección se llame ahora "Planes
+ * diarios": el cambio es de cara al usuario, y renombrarla solo añadiría ruido
+ * al diff (mismo criterio que ProfileParametersController — sección 4.14).
+ *
+ * Es un controlador de composición, como DashboardController: no calcula nada
+ * por su cuenta, solo orquesta servicios de dominio y traduce sus excepciones
+ * a redirects con mensaje — nunca a un 500.
+ */
 class PlanComidaController extends Controller
 {
     /**
-     * Profile fields NutritionCalculatorService needs before a plan can be generated.
+     * Planes diarios por página en el listado. Un mes de historial entra en la
+     * primera página sin que la consulta crezca sin límite.
      */
-    private const PARAMETROS_REQUERIDOS = [
-        'peso_kg',
-        'nivel_actividad',
-        'tipo_deficit',
-        'valor_deficit',
-        'proteina_factor',
-        'grasa_factor',
-    ];
+    private const PLANES_POR_PAGINA = 30;
 
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
         private readonly MealPlanGeneratorService $generador,
+        private readonly MealDistributionService $distribucion,
+        private readonly ActivitySuggestionService $sugerenciaActividad,
+        private readonly DailyClosureService $cierre,
     ) {}
 
     /**
-     * Show today's meal plan (and the button to generate it).
+     * Listado de todos los planes diarios del usuario, del más reciente al más
+     * antiguo.
      */
     public function index(Request $request): View
     {
-        $registroDiario = $this->registroDiarioDeHoy($request);
+        $usuario = $request->user();
 
         return view('planes.index', [
-            'registroDiario' => $registroDiario,
-            'planes' => $registroDiario
-                ? $registroDiario->planesComida()->with('comidaReal')->orderBy('id')->get()
-                : collect(),
-            'ingredientes' => $registroDiario
-                ? $registroDiario->ingredientesDisponibles()->get()
-                : collect(),
+            'planes' => $this->listado($request),
+            'registroDeHoy' => $this->registroDiarioDeHoy($request),
+            'perfilCompleto' => $this->distribucion->perfilCompleto($usuario),
         ]);
     }
 
     /**
-     * "Generar mi plan de hoy": build the plan out of today's reported
-     * ingredients. Every domain failure comes back as a redirect with an error
-     * message — never as a 500.
+     * "Crear plan diario": abre el RegistroDiario de hoy si aún no existe y
+     * lleva a su detalle. Es el primer paso del flujo diario y no recibe
+     * ninguna entrada, así que no hay Form Request que aplicar (sección 7).
      */
-    public function generar(Request $request): RedirectResponse
+    public function crear(Request $request): RedirectResponse
     {
+        $registroDiario = $this->registroDiarioDeHoy($request);
+        $yaExistia = $registroDiario !== null;
+
+        $registroDiario ??= RegistroDiario::create([
+            'usuario_id' => $request->user()->id,
+            'fecha' => now()->toDateString(),
+        ]);
+
+        return Redirect::route('planes.show', $registroDiario)
+            ->with('status', $yaExistia ? 'plan-existente' : 'plan-creado');
+    }
+
+    /**
+     * El detalle de un plan diario: las tres secciones del día.
+     */
+    public function show(Request $request, RegistroDiario $registroDiario): View
+    {
+        $this->autorizar($request, $registroDiario);
+
         $usuario = $request->user();
 
-        foreach (self::PARAMETROS_REQUERIDOS as $parametro) {
-            if ($usuario->{$parametro} === null) {
-                return Redirect::route('profile.parametros.edit')
-                    ->with('error', __('Completa tus parámetros nutricionales antes de generar el plan.'));
-            }
+        $datos = [
+            'registroDiario' => $registroDiario,
+            'perfilCompleto' => $this->distribucion->perfilCompleto($usuario),
+            'errorPerfil' => null,
+            'objetivos' => null,
+            'comidas' => [],
+            'actividad' => null,
+            'actividades' => $registroDiario->actividadesFisicas()->latest()->get(),
+            'resumenCierre' => null,
+        ];
+
+        if (! $datos['perfilCompleto']) {
+            $datos['errorPerfil'] = __('Completa tu Calculadora Déficit para saber cuántas calorías debes consumir hoy.');
+
+            return view('planes.show', $datos);
         }
 
-        $registroDiario = $this->registroDiarioDeHoy($request);
+        try {
+            $datos['objetivos'] = $this->distribucion->objetivosDelDia($usuario);
+            $datos['actividad'] = $this->sugerenciaActividad->sugerir(
+                $usuario,
+                $datos['objetivos']['dia']['calorias_objetivo'],
+            );
+            $datos['resumenCierre'] = $this->cierre->resumen($registroDiario);
+        } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
+            $datos['errorPerfil'] = $e->getMessage();
 
-        if (! $registroDiario) {
-            return Redirect::route('ingredientes.create')
-                ->with('error', __('No hay ingredientes disponibles reportados para hoy. Repórtalos antes de generar el plan.'));
+            return view('planes.show', $datos);
+        }
+
+        $datos['comidas'] = $this->comidasDelDia($registroDiario, $datos['objetivos']['por_comida']);
+
+        return view('planes.show', $datos);
+    }
+
+    /**
+     * "Generar distribución": guarda el texto de las tres comidas y pide al
+     * motor de IA, en una sola llamada, el reparto de las que haga falta
+     * resolver. Un mismo botón hace las dos cosas para que el usuario no tenga
+     * que guardar y luego generar.
+     *
+     * Las comidas ya resueltas cuyo texto no cambió se dejan intactas y su
+     * presupuesto se descuenta; las que aún no tienen texto reservan el suyo
+     * (sección 4.12).
+     */
+    public function distribuir(DistribucionDiaRequest $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        if (! $this->distribucion->perfilCompleto($request->user())) {
+            return Redirect::route('calculadora.edit')
+                ->with('error', __('Completa tu Calculadora Déficit antes de generar una distribución.'));
+        }
+
+        try {
+            $this->distribucion->distribuirDia(
+                $registroDiario,
+                (array) $request->validated('ingredientes'),
+                $request->validated('rehacer'),
+            );
+        } catch (MealDistributionUnavailableException $e) {
+            return Redirect::route('planes.show', $registroDiario)->with('error', $e->getMessage());
+        } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
+            return Redirect::route('calculadora.edit')->with('error', $e->getMessage());
+        }
+
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'distribucion-generada');
+    }
+
+    /**
+     * Peso del día. Vive dentro del plan diario porque es un dato más de ese
+     * día, no una pantalla propia (sección 4.11).
+     *
+     * A propósito no toca `users.peso_kg`: ese es el peso de perfil que
+     * dimensiona el TMB y solo se cambia explícitamente en la Calculadora.
+     * Se permite sobre un día cerrado — `peso_kg` no alimenta ninguna cifra del
+     * cierre, solo la analítica de tendencias.
+     */
+    public function peso(RegistroPesoRequest $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        $registroDiario->update(['peso_kg' => $request->validated('peso_kg')]);
+
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'peso-guardado');
+    }
+
+    /**
+     * Generación heurística a partir de los IngredienteDisponible reportados
+     * (CLAUDE.md sección 4.2). Ya no está enlazada desde la interfaz —"Generar
+     * distribución" la sustituyó— pero se conserva porque sigue siendo un
+     * camino válido y cubierto por tests cuando el día tiene ingredientes
+     * estructurados.
+     */
+    public function generar(Request $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        $usuario = $request->user();
+
+        if (! $this->distribucion->perfilCompleto($usuario)) {
+            return Redirect::route('calculadora.edit')
+                ->with('error', __('Completa tus parámetros nutricionales antes de generar el plan.'));
         }
 
         try {
@@ -81,19 +214,77 @@ class PlanComidaController extends Controller
                 (float) $usuario->valor_deficit,
                 (float) $usuario->proteina_factor,
                 (float) $usuario->grasa_factor,
-                // The target in force, which a confirmed RecomendacionSistema may
-                // have moved away from the raw formula (CLAUDE.md section 4.10).
+                // El objetivo vigente, que una RecomendacionSistema confirmada
+                // puede haber movido respecto de la fórmula (sección 4.10).
                 $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
             );
 
             $this->generador->generarPlan($registroDiario, $planNutricional);
         } catch (NoIngredientsAvailableException $e) {
-            return Redirect::route('ingredientes.create')->with('error', $e->getMessage());
+            return Redirect::route('planes.show', $registroDiario)->with('error', $e->getMessage());
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
-            return Redirect::route('profile.parametros.edit')->with('error', $e->getMessage());
+            return Redirect::route('calculadora.edit')->with('error', $e->getMessage());
         }
 
-        return Redirect::route('planes.index')->with('status', 'plan-generado');
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'plan-generado');
+    }
+
+    /**
+     * Los planes diarios del usuario con lo que el listado necesita mostrar de
+     * cada uno, sin cargar sus relaciones completas.
+     *
+     * @return LengthAwarePaginator<int, RegistroDiario>
+     */
+    private function listado(Request $request): LengthAwarePaginator
+    {
+        return RegistroDiario::where('usuario_id', $request->user()->id)
+            ->withCount([
+                'planesComida as comidas_planificadas',
+                'planesComida as comidas_registradas' => fn ($consulta) => $consulta->has('comidaReal'),
+                'actividadesFisicas as actividades_registradas',
+            ])
+            ->orderByDesc('fecha')
+            ->paginate(self::PLANES_POR_PAGINA)
+            ->withQueryString();
+    }
+
+    /**
+     * Una entrada por comida de MealPlanGeneratorService::DISTRIBUCION_COMIDAS,
+     * en ese orden, con su texto de ingredientes, su objetivo y su plan si ya
+     * se generó.
+     *
+     * @param  array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>  $objetivosPorComida
+     * @return array<int, array<string, mixed>>
+     */
+    private function comidasDelDia(RegistroDiario $registroDiario, array $objetivosPorComida): array
+    {
+        $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
+
+        $comidas = [];
+
+        foreach (MealPlanGeneratorService::DISTRIBUCION_COMIDAS as $tipoComida => $porcentaje) {
+            $plan = $planes->get($tipoComida);
+
+            $comidas[] = [
+                'tipo' => $tipoComida,
+                'porcentaje' => $porcentaje,
+                'objetivos' => $objetivosPorComida[$tipoComida],
+                'texto' => $registroDiario->{'ingredientes_'.$tipoComida},
+                'plan' => $plan,
+                'estado' => match (true) {
+                    $plan === null => 'pendiente',
+                    $plan->comidaReal !== null => 'registrada',
+                    default => 'planificada',
+                },
+            ];
+        }
+
+        return $comidas;
+    }
+
+    private function autorizar(Request $request, RegistroDiario $registroDiario): void
+    {
+        abort_unless($registroDiario->usuario_id === $request->user()->id, 403);
     }
 
     private function registroDiarioDeHoy(Request $request): ?RegistroDiario

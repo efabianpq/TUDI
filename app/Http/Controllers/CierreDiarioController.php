@@ -4,14 +4,24 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DayAlreadyClosedException;
 use App\Exceptions\InvalidNutritionParameterException;
+use App\Exceptions\MealDistributionUnavailableException;
 use App\Exceptions\NegativeCarbohydrateException;
+use App\Http\Requests\CierreDiarioRequest;
 use App\Models\RegistroDiario;
+use App\Services\CierreFeedbackService;
 use App\Services\DailyClosureService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
-use Illuminate\View\View;
 
+/**
+ * Cierre de un plan diario (CLAUDE.md secciones 4.5 y 4.16).
+ *
+ * No tiene pantalla propia: el cierre es la tercera sección del detalle del
+ * plan diario. Antes de congelar el día se registra el feedback de cumplimiento
+ * de cada comida (CierreFeedbackService), de modo que las cifras del cierre
+ * reflejen lo que realmente se comió y no solo lo planificado.
+ */
 class CierreDiarioController extends Controller
 {
     /**
@@ -28,65 +38,49 @@ class CierreDiarioController extends Controller
 
     public function __construct(
         private readonly DailyClosureService $cierre,
+        private readonly CierreFeedbackService $feedback,
     ) {}
 
     /**
-     * Summary of today's closure: live preview while the day is open, the
-     * persisted snapshot once it is closed.
+     * "Cerrar mi día": consolida el feedback de las comidas y congela el día
+     * con sus cifras. Todo fallo de dominio vuelve como redirect con mensaje,
+     * nunca como un 500.
      */
-    public function index(Request $request): View
+    public function cerrar(CierreDiarioRequest $request, RegistroDiario $registroDiario): RedirectResponse
     {
-        $registroDiario = $this->registroDiarioDeHoy($request);
-        $resumen = null;
-        $errorResumen = null;
+        abort_unless($registroDiario->usuario_id === $request->user()->id, 403);
 
-        if ($registroDiario) {
-            if ($this->parametroFaltante($request) !== null) {
-                $errorResumen = __('Completa tus parámetros nutricionales para poder cerrar el día.');
-            } else {
-                try {
-                    $resumen = $this->cierre->resumen($registroDiario);
-                } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
-                    $errorResumen = $e->getMessage();
-                }
-            }
-        }
+        $volverAlPlan = route('planes.show', $registroDiario);
 
-        return view('cierre.index', [
-            'registroDiario' => $registroDiario,
-            'resumen' => $resumen,
-            'errorResumen' => $errorResumen,
-        ]);
-    }
-
-    /**
-     * "Cerrar mi día": freeze today's record with its closure figures. Every
-     * domain failure comes back as a redirect with an error message, never as
-     * a 500.
-     */
-    public function cerrar(Request $request): RedirectResponse
-    {
         if ($this->parametroFaltante($request) !== null) {
-            return Redirect::route('profile.parametros.edit')
+            return Redirect::route('calculadora.edit')
                 ->with('error', __('Completa tus parámetros nutricionales antes de cerrar el día.'));
         }
 
-        $registroDiario = $this->registroDiarioDeHoy($request);
+        if ($registroDiario->cerrado) {
+            return Redirect::back(fallback: $volverAlPlan)
+                ->with('error', DayAlreadyClosedException::alCerrar($registroDiario->id)->getMessage());
+        }
 
-        if (! $registroDiario) {
-            return Redirect::route('cierre.index')
-                ->with('error', __('Todavía no hay nada registrado hoy: no hay un día que cerrar.'));
+        // El feedback se consolida antes de cerrar: un día ya cerrado no admite
+        // ComidaReal nuevas (sección 4.5). Si el proveedor de IA no puede
+        // interpretar lo que se comió, el día no se cierra y el usuario puede
+        // corregir el texto y reintentar.
+        try {
+            $this->feedback->registrar($registroDiario, (array) $request->validated('feedback', []));
+        } catch (MealDistributionUnavailableException $e) {
+            return Redirect::back(fallback: $volverAlPlan)->with('error', $e->getMessage());
         }
 
         try {
-            $this->cierre->cerrar($registroDiario);
+            $this->cierre->cerrar($registroDiario->refresh());
         } catch (DayAlreadyClosedException $e) {
-            return Redirect::route('cierre.index')->with('error', $e->getMessage());
+            return Redirect::back(fallback: $volverAlPlan)->with('error', $e->getMessage());
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
-            return Redirect::route('profile.parametros.edit')->with('error', $e->getMessage());
+            return Redirect::route('calculadora.edit')->with('error', $e->getMessage());
         }
 
-        return Redirect::route('cierre.index')->with('status', 'dia-cerrado');
+        return Redirect::back(fallback: $volverAlPlan)->with('status', 'dia-cerrado');
     }
 
     /**
@@ -98,7 +92,8 @@ class CierreDiarioController extends Controller
 
         $this->cierre->reabrir($registroDiario);
 
-        return Redirect::route('cierre.index')->with('status', 'dia-reabierto');
+        return Redirect::back(fallback: route('planes.show', $registroDiario))
+            ->with('status', 'dia-reabierto');
     }
 
     /**
@@ -114,12 +109,5 @@ class CierreDiarioController extends Controller
         }
 
         return null;
-    }
-
-    private function registroDiarioDeHoy(Request $request): ?RegistroDiario
-    {
-        return RegistroDiario::where('usuario_id', $request->user()->id)
-            ->whereDate('fecha', now()->toDateString())
-            ->first();
     }
 }

@@ -7,55 +7,36 @@ use App\Http\Requests\ActividadFisicaRequest;
 use App\Models\RegistroDiario;
 use App\Services\ActivityCorrectionService;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redirect;
-use Illuminate\View\View;
 
+/**
+ * Registro de la actividad física de un plan diario (CLAUDE.md sección 4.13).
+ *
+ * No tiene pantalla propia: la sección "Actividad física" vive dentro del
+ * detalle del plan diario, que es donde está el día al que pertenece lo que se
+ * registra.
+ */
 class ActividadFisicaController extends Controller
 {
     public function __construct(private readonly ActivityCorrectionService $activityCorrectionService) {}
 
     /**
-     * Show the form to register today's physical activity, along with the
-     * activities already reported today.
+     * Registra una actividad en un plan diario, aplicando el factor de
+     * corrección de su tipo y recalculando `calorias_actividad_ajustada` del
+     * RegistroDiario desde cero (idempotente, igual que ComidaRealService con
+     * `calorias_consumidas`).
      */
-    public function create(Request $request): View
+    public function store(ActividadFisicaRequest $request, RegistroDiario $registroDiario): RedirectResponse
     {
-        $registroDiario = RegistroDiario::where('usuario_id', $request->user()->id)
-            ->whereDate('fecha', now()->toDateString())
-            ->first();
+        abort_unless($registroDiario->usuario_id === $request->user()->id, 403);
 
-        $actividades = $registroDiario
-            ? $registroDiario->actividadesFisicas()->latest()->get()
-            : collect();
+        $volverAlPlan = route('planes.show', $registroDiario);
 
-        return view('actividades.create', [
-            'actividades' => $actividades,
-        ]);
-    }
-
-    /**
-     * Store a physical activity for today, applying the correction factor
-     * and recalculating the RegistroDiario's calorias_actividad_ajustada.
-     */
-    public function store(ActividadFisicaRequest $request): RedirectResponse
-    {
-        $registroDiario = RegistroDiario::where('usuario_id', $request->user()->id)
-            ->whereDate('fecha', now()->toDateString())
-            ->first();
-
-        if (! $registroDiario) {
-            $registroDiario = RegistroDiario::create([
-                'usuario_id' => $request->user()->id,
-                'fecha' => now()->toDateString(),
-            ]);
-        }
-
-        // A closed day is frozen: a new activity would change the
-        // calorias_actividad_ajustada its closure was computed from.
+        // Un día cerrado está congelado: una actividad nueva cambiaría la
+        // calorias_actividad_ajustada con la que se calculó su cierre.
         if ($registroDiario->cerrado) {
-            return Redirect::route('cierre.index')
+            return Redirect::back(fallback: $volverAlPlan)
                 ->with('error', DayAlreadyClosedException::alRegistrarActividad($registroDiario->id)->getMessage());
         }
 
@@ -82,6 +63,6 @@ class ActividadFisicaController extends Controller
             ]);
         });
 
-        return Redirect::route('actividades.create')->with('status', 'actividad-guardada');
+        return Redirect::back(fallback: $volverAlPlan)->with('status', 'actividad-guardada');
     }
 }

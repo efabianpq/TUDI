@@ -25,12 +25,12 @@ class ComidaRealController extends Controller
         abort_unless($planComida->registroDiario->usuario_id === $request->user()->id, 403);
 
         if ($planComida->registroDiario->cerrado) {
-            return Redirect::route('cierre.index')
+            return Redirect::route('planes.show', $planComida->registroDiario)
                 ->with('error', DayAlreadyClosedException::alRegistrarComida($planComida->registro_diario_id)->getMessage());
         }
 
         if ($planComida->comidaReal) {
-            return Redirect::route('planes.index')
+            return Redirect::route('planes.show', $planComida->registroDiario)
                 ->with('error', __('Esta comida ya tiene una comida real registrada.'));
         }
 
@@ -49,7 +49,7 @@ class ComidaRealController extends Controller
         abort_unless($planComida->registroDiario->usuario_id === $request->user()->id, 403);
 
         if ($planComida->comidaReal) {
-            return Redirect::route('planes.index')
+            return Redirect::route('planes.show', $planComida->registroDiario)
                 ->with('error', __('Esta comida ya tiene una comida real registrada.'));
         }
 
@@ -60,9 +60,9 @@ class ComidaRealController extends Controller
                 $request->file('imagen'),
             );
         } catch (DayAlreadyClosedException $e) {
-            return Redirect::route('cierre.index')->with('error', $e->getMessage());
+            return Redirect::route('planes.show', $planComida->registroDiario)->with('error', $e->getMessage());
         }
 
-        return Redirect::route('planes.index')->with('status', 'comida-real-guardada');
+        return Redirect::route('planes.show', $planComida->registroDiario)->with('status', 'comida-real-guardada');
     }
 }

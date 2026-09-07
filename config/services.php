@@ -28,6 +28,25 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Claude (Anthropic) — motor de distribución de comidas
+    |--------------------------------------------------------------------------
+    |
+    | CLAUDE.md sección 4.12. La clave nunca se hardcodea ni se commitea: vive
+    | solo en .env (sección 10). Sin clave configurada, la aplicación sigue
+    | funcionando y el botón "Generar distribución" devuelve un error de
+    | dominio controlado en vez de un 500.
+    |
+    */
+
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+        'model' => env('ANTHROPIC_MODEL', 'claude-haiku-4-5'),
+        'endpoint' => env('ANTHROPIC_ENDPOINT', 'https://api.anthropic.com/v1/messages'),
+        'timeout' => (int) env('ANTHROPIC_TIMEOUT', 60),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
