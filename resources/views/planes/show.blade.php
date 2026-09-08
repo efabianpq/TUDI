@@ -1,6 +1,7 @@
 @php
     $kcal = fn ($valor) => number_format((float) $valor, 0, ',', '.');
     $gramos = fn ($valor) => number_format((float) $valor, 1, ',', '.');
+    $porcentaje = fn ($parte, $total) => $total > 0 ? max(0, min(100, round($parte / $total * 100))) : 0;
 
     $totalPlanificado = collect($comidas)
         ->map(fn ($comida) => (float) ($comida['plan']->calorias_estimadas ?? 0))
@@ -8,195 +9,198 @@
     $proteinaPlanificada = collect($comidas)
         ->map(fn ($comida) => (float) ($comida['plan']->proteina_g ?? 0))
         ->sum();
+    $grasaPlanificada = collect($comidas)
+        ->map(fn ($comida) => (float) ($comida['plan']->grasa_g ?? 0))
+        ->sum();
+    $carbohidratosPlanificados = collect($comidas)
+        ->map(fn ($comida) => (float) ($comida['plan']->carbohidratos_g ?? 0))
+        ->sum();
 
     // Comidas planificadas pendientes de registrar: son las que el cierre
     // pregunta si se cumplieron (CLAUDE.md sección 4.16).
     $comidasPorConfirmar = collect($comidas)->where('estado', 'planificada');
+
+    // Acordeón: solo una comida abierta a la vez. Arranca en la primera que
+    // todavía no se ha registrado — la que el usuario tiene que resolver.
+    $comidaAbierta = collect($comidas)->firstWhere('estado', '!=', 'registrada')['tipo'] ?? null;
 @endphp
 
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <div class="flex items-baseline gap-3">
-                <a href="{{ route('planes.index') }}" class="text-sm text-indigo-600 hover:underline">
-                    &larr; {{ __('Planes') }}
+        <div class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="{{ route('planes.index') }}"
+                   class="grid h-11 w-11 flex-none place-items-center rounded-full text-tudi-muted no-underline hover:bg-tudi-surface"
+                   aria-label="{{ __('Volver a Planes diarios') }}">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
                 </a>
-                <h2 class="font-semibold text-lg sm:text-xl text-gray-800 leading-tight">
+                <h1 class="truncate text-lg font-semibold tracking-tudi-title sm:text-2xl">
                     {{ __('Plan del') }} {{ $registroDiario->fecha->format('d/m/Y') }}
-                </h2>
+                </h1>
             </div>
+
             <span @class([
-                'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                'bg-green-100 text-green-800' => $registroDiario->cerrado,
-                'bg-amber-100 text-amber-800' => ! $registroDiario->cerrado,
+                'tudi-chip flex-none uppercase tracking-tudi-label',
+                'tudi-chip-solid text-tudi-lime' => ! $registroDiario->cerrado,
+                'tudi-chip-solid' => $registroDiario->cerrado,
             ])>{{ $registroDiario->cerrado ? __('cerrado') : __('abierto') }}</span>
         </div>
     </x-slot>
 
-    <div class="py-4 sm:py-8">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4 sm:space-y-6">
+    <div id="tudi-avisos">
+        <x-tudi.flash :mensajes="[
+            'plan-creado' => __('Tu plan de hoy está listo.'),
+            'plan-existente' => __('Ya tenías un plan para hoy.'),
+            'distribucion-generada' => __('Distribución generada.'),
+            'plan-generado' => __('Plan generado.'),
+            'comida-real-guardada' => __('Comida registrada.'),
+            'actividad-guardada' => __('Actividad registrada.'),
+            'peso-guardado' => __('Peso registrado.'),
+            'dia-cerrado' => __('Tu día quedó cerrado.'),
+            'dia-reabierto' => __('Tu día está abierto de nuevo.'),
+        ]" />
+    </div>
 
-            @if (session('error'))
-                <div class="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
-                    {{ session('error') }}
-                </div>
-            @endif
+    @if ($errorPerfil)
+        <div class="tudi-panel">
+            <p class="tudi-label">{{ __('Calculadora Déficit') }}</p>
+            <p class="mt-3 text-tudi-on-dark-2">{{ $errorPerfil }}</p>
+            <a href="{{ route('calculadora.edit') }}" class="tudi-btn tudi-btn-lime tudi-btn-block mt-5 no-underline">
+                {{ __('Ir a la Calculadora Déficit') }}
+            </a>
+        </div>
+    @else
 
-            @if ($errors->any())
-                <div class="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
-                    <ul class="list-disc list-inside space-y-1">
-                        @foreach ($errors->all() as $mensaje)
-                            <li>{{ $mensaje }}</li>
-                        @endforeach
-                    </ul>
-                </div>
-            @endif
+    <div class="space-y-8">
 
-            @php
-                $mensajesDeExito = [
-                    'plan-creado' => __('Tu plan diario está listo. Empieza contándonos qué tienes para comer.'),
-                    'plan-existente' => __('Ya tenías un plan para hoy: aquí lo tienes.'),
-                    'distribucion-generada' => __('Distribución generada.'),
-                    'plan-generado' => __('Tu plan se generó correctamente.'),
-                    'comida-real-guardada' => __('Tu comida real se registró correctamente.'),
-                    'actividad-guardada' => __('Tu actividad se registró correctamente.'),
-                    'peso-guardado' => __('Tu peso quedó registrado en este día.'),
-                    'dia-cerrado' => __('Tu día quedó cerrado.'),
-                    'dia-reabierto' => __('Tu día está abierto de nuevo.'),
-                ];
-            @endphp
+        <div class="grid gap-5 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:items-start lg:gap-6">
 
-            @if (isset($mensajesDeExito[session('status')]))
-                <div class="p-4 bg-green-50 border border-green-200 text-green-700 rounded-xl text-sm">
-                    {{ $mensajesDeExito[session('status')] }}
-                </div>
-            @endif
-
-            {{-- ── Perfil incompleto: nada más tiene sentido sin objetivo calórico ── --}}
-            @if ($errorPerfil)
-                <div class="p-4 sm:p-8 bg-white shadow-sm rounded-xl">
-                    <h3 class="text-base sm:text-lg font-medium text-gray-900">{{ __('Primero, tu objetivo calórico') }}</h3>
-                    <p class="mt-2 text-sm text-gray-600">{{ $errorPerfil }}</p>
-                    <a href="{{ route('calculadora.edit') }}"
-                       class="mt-4 inline-flex w-full sm:w-auto items-center justify-center rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition">
-                        {{ __('Ir a la Calculadora Déficit') }}
-                    </a>
-                </div>
-            @else
-
-            {{-- ── Objetivo del día ── --}}
-            <div class="p-4 sm:p-6 bg-white shadow-sm rounded-xl">
-                <div class="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 class="text-base sm:text-lg font-medium text-gray-900">{{ __('Tu objetivo de este día') }}</h3>
-                    <span class="text-xl sm:text-2xl font-bold text-indigo-600">
-                        {{ $kcal($objetivos['dia']['calorias_objetivo']) }} <span class="text-sm font-medium">kcal</span>
-                    </span>
-                </div>
-
-                <dl class="mt-4 grid grid-cols-3 gap-2 sm:gap-4 text-center">
-                    <div class="rounded-lg bg-gray-50 py-2">
-                        <dt class="text-xs text-gray-500">{{ __('Proteína') }}</dt>
-                        <dd class="text-sm sm:text-base font-semibold text-gray-900">{{ $gramos($objetivos['dia']['proteina_g']) }} g</dd>
-                    </div>
-                    <div class="rounded-lg bg-gray-50 py-2">
-                        <dt class="text-xs text-gray-500">{{ __('Grasa') }}</dt>
-                        <dd class="text-sm sm:text-base font-semibold text-gray-900">{{ $gramos($objetivos['dia']['grasa_g']) }} g</dd>
-                    </div>
-                    <div class="rounded-lg bg-gray-50 py-2">
-                        <dt class="text-xs text-gray-500">{{ __('Carbohidratos') }}</dt>
-                        <dd class="text-sm sm:text-base font-semibold text-gray-900">{{ $gramos($objetivos['dia']['carbohidratos_g']) }} g</dd>
-                    </div>
-                </dl>
-
-                @if ($totalPlanificado > 0)
-                    <p class="mt-4 text-sm text-gray-600">
-                        {{ __('Planificado hasta ahora:') }}
-                        <strong class="text-gray-900">{{ $kcal($totalPlanificado) }} kcal</strong>
-                        · {{ $gramos($proteinaPlanificada) }} g {{ __('de proteína') }}
-                    </p>
-                @endif
-
-                {{-- Peso del día: un dato más de este plan, no una pantalla aparte. --}}
-                <form method="post" action="{{ route('planes.peso', $registroDiario) }}"
-                      class="mt-4 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
-                    @csrf
-                    <div class="grow sm:grow-0">
-                        <x-input-label for="peso_kg" :value="__('Tu peso hoy (kg)')" />
-                        <input id="peso_kg" name="peso_kg" type="number" inputmode="decimal" step="0.01" min="20" max="400"
-                               value="{{ old('peso_kg', $registroDiario->peso_kg) }}"
-                               placeholder="{{ __('Ej.: 80.4') }}"
-                               class="mt-1 block w-full sm:w-40 rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                    </div>
-                    <button type="submit"
-                            class="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                        {{ __('Guardar peso') }}
-                    </button>
-                    <p class="w-full text-xs text-gray-500">
-                        {{ __('Alimenta tu promedio móvil de 7 días. No cambia el peso de tu Calculadora Déficit.') }}
-                    </p>
-                </form>
+        {{-- ══ Objetivo del día: el dato protagonista de la pantalla ══ --}}
+        <div id="panel-objetivo" class="tudi-panel on-dark lg:sticky lg:top-8" x-data="{ peso: false }">
+            <div class="flex items-end justify-between gap-4">
+                <span class="tudi-label pb-1.5">{{ __('Objetivo del día') }}</span>
+                <span class="flex items-baseline gap-1.5">
+                    <span class="tudi-num text-[38px] text-tudi-on-dark">{{ $kcal($objetivos['dia']['calorias_objetivo']) }}</span>
+                    <span class="tudi-meta">kcal</span>
+                </span>
             </div>
 
-            {{-- ══ 1. Cálculo alimenticio ══ --}}
-            <section class="space-y-3 sm:space-y-4">
-                <div class="px-1">
-                    <h3 class="text-base sm:text-lg font-semibold text-gray-900">{{ __('1. Cálculo alimenticio') }}</h3>
-                    <p class="mt-1 text-sm text-gray-600">
-                        {{ __('Cuéntanos en un párrafo qué tienes disponible para cada comida y pulsa una sola vez "Generar distribución": la IA reparte el día entero de una vez. Puedes escribirlo o dictarlo.') }}
-                    </p>
-                    <p class="mt-1 text-sm text-gray-500">
-                        {{ __('No hace falta rellenar las tres. Si solo escribes el desayuno y el almuerzo, se reservan las calorías de la cena para cuando la escribas, y lo ya generado no se toca.') }}
-                    </p>
+            <div class="mt-4 space-y-2.5">
+                @foreach ([
+                    ['letra' => 'P', 'objetivo' => $objetivos['dia']['proteina_g'], 'planificado' => $proteinaPlanificada, 'color' => 'var(--tudi-lime)'],
+                    ['letra' => 'G', 'objetivo' => $objetivos['dia']['grasa_g'], 'planificado' => $grasaPlanificada, 'color' => 'var(--tudi-amber)'],
+                    ['letra' => 'C', 'objetivo' => $objetivos['dia']['carbohidratos_g'], 'planificado' => $carbohidratosPlanificados, 'color' => 'var(--tudi-on-dark)'],
+                ] as $macro)
+                    <div class="flex items-center gap-3">
+                        <span class="tudi-meta w-4">{{ $macro['letra'] }}</span>
+                        <span class="tudi-bar flex-1" style="--pct: {{ $porcentaje($macro['planificado'], $macro['objetivo']) }}">
+                            <span style="background: {{ $macro['color'] }}"></span>
+                        </span>
+                        <span class="tudi-meta w-16 text-end text-tudi-on-dark">{{ $gramos($macro['objetivo']) }} g</span>
+                    </div>
+                @endforeach
+            </div>
+
+            <div class="mt-4 flex items-center justify-between gap-3 border-t border-tudi-dark-3 pt-3">
+                <span class="text-[13px] text-tudi-on-dark-2">
+                    {{ __('Planificado:') }} {{ $kcal($totalPlanificado) }} kcal
+                </span>
+                <button type="button" x-on:click="peso = ! peso" class="text-[13px] text-tudi-lime">
+                    {{ $registroDiario->peso_kg ? $gramos($registroDiario->peso_kg).' kg' : __('Peso de hoy') }} +
+                </button>
+            </div>
+
+            <form method="post" action="{{ route('planes.peso', $registroDiario) }}" data-fetch
+                  x-show="peso" style="display: none"
+                  class="mt-3 flex items-end gap-2">
+                @csrf
+                <div class="flex-1">
+                    <label for="peso_kg" class="tudi-label">{{ __('Tu peso hoy (kg)') }}</label>
+                    <input id="peso_kg" name="peso_kg" type="number" inputmode="decimal" step="0.01" min="20" max="400"
+                           value="{{ old('peso_kg', $registroDiario->peso_kg) }}"
+                           placeholder="80,4"
+                           class="tudi-input mt-1 bg-tudi-dark-2 text-tudi-on-dark"
+                           style="border-color: var(--tudi-dark-4)">
                 </div>
+                <button type="submit" class="tudi-btn tudi-btn-lime flex-none">{{ __('Guardar') }}</button>
+            </form>
+        </div>
 
-                <form method="post" action="{{ route('planes.distribucion', $registroDiario) }}" class="space-y-3 sm:space-y-4">
-                    @csrf
+        {{-- ══ Cálculo alimenticio ══ --}}
+        <section class="space-y-3">
+            <div class="flex items-center justify-between gap-3 px-1">
+                <p class="tudi-label">{{ __('Cálculo alimenticio') }}</p>
 
+                <div x-data="{ abierto: false }" x-on:keydown.escape.window="abierto = false">
+                    <button type="button" x-on:click="abierto = true" class="tudi-link text-[13px]">
+                        {{ __('¿Cómo funciona?') }}
+                    </button>
+
+                    <div x-show="abierto" style="display: none"
+                         class="fixed inset-0 z-50 flex items-end justify-center bg-tudi-ink/60 p-4 sm:items-center"
+                         x-on:click.self="abierto = false" role="dialog" aria-modal="true">
+                        <div class="tudi-card w-full max-w-md p-6">
+                            <h2 class="text-lg font-semibold tracking-tudi-title">{{ __('¿Cómo funciona?') }}</h2>
+                            <div class="mt-3 space-y-3 text-sm text-tudi-ink-3">
+                                <p>{{ __('Escribe o dicta lo que tienes para cada comida. Con un solo botón se reparte el día entero: cada comida recibe su parte del objetivo (25% desayuno, 40% almuerzo, 35% cena).') }}</p>
+                                <p>{{ __('No hace falta rellenar las tres. Lo que ya está generado no se toca, y las comidas sin texto guardan sus calorías para cuando las escribas.') }}</p>
+                            </div>
+                            <button type="button" x-on:click="abierto = false" class="tudi-btn tudi-btn-primary tudi-btn-block mt-5">
+                                {{ __('Entendido') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <form method="post" action="{{ route('planes.distribucion', $registroDiario) }}" data-fetch>
+                @csrf
+
+                <div id="lista-comidas" class="space-y-2.5">
                     @foreach ($comidas as $comida)
                         @php
                             $plan = $comida['plan'];
                             $comidaReal = $plan?->comidaReal;
+                            $abierta = $comida['tipo'] === $comidaAbierta;
                         @endphp
 
-                        <div class="bg-white shadow-sm rounded-xl overflow-hidden">
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 sm:px-6">
-                                <div class="flex items-center gap-2">
-                                    <h4 class="text-base font-semibold text-gray-900 capitalize">{{ $comida['tipo'] }}</h4>
+                        <details class="tudi-card" data-comida="{{ $comida['tipo'] }}" {{ $abierta ? 'open' : '' }}>
+                            <summary class="flex min-h-[56px] cursor-pointer list-none items-center justify-between gap-3 p-4">
+                                <span class="flex items-center gap-2.5">
                                     <span @class([
-                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-                                        'bg-gray-100 text-gray-600' => $comida['estado'] === 'pendiente',
-                                        'bg-amber-100 text-amber-800' => $comida['estado'] === 'planificada',
-                                        'bg-green-100 text-green-800' => $comida['estado'] === 'registrada',
-                                    ])>{{ __($comida['estado']) }}</span>
-                                </div>
-                                <span class="text-xs sm:text-sm text-gray-500">
-                                    {{ __('Objetivo:') }}
-                                    <strong class="text-gray-700">{{ $kcal($comida['objetivos']['calorias']) }} kcal</strong>
-                                    ({{ (int) round($comida['porcentaje'] * 100) }}%)
-                                    · P {{ $gramos($comida['objetivos']['proteina_g']) }} g
+                                        'h-2 w-2 flex-none rounded-full',
+                                        'bg-tudi-lime' => $comida['estado'] !== 'pendiente',
+                                        'bg-tudi-input-border' => $comida['estado'] === 'pendiente',
+                                    ])></span>
+                                    <span class="font-semibold capitalize tracking-tudi-title">{{ $comida['tipo'] }}</span>
+                                    <span class="sr-only">{{ __($comida['estado']) }}</span>
                                 </span>
-                            </div>
+                                <span class="tudi-meta">
+                                    {{ $kcal($plan->calorias_estimadas ?? $comida['objetivos']['calorias']) }} kcal ·
+                                    {{ (int) round($comida['porcentaje'] * 100) }}%
+                                </span>
+                            </summary>
 
-                            <div class="p-4 sm:p-6 space-y-4">
+                            <div class="px-4 pb-4">
                                 @if ($comida['estado'] !== 'registrada')
-                                    <label for="ingredientes-{{ $comida['tipo'] }}" class="block text-sm font-medium text-gray-700">
-                                        {{ __('¿Qué tienes para el') }} {{ $comida['tipo'] }}?
-                                    </label>
-
                                     <div class="relative">
+                                        <label for="ingredientes-{{ $comida['tipo'] }}" class="sr-only">
+                                            {{ __('Ingredientes para el') }} {{ $comida['tipo'] }}
+                                        </label>
                                         <textarea id="ingredientes-{{ $comida['tipo'] }}"
                                                   name="ingredientes[{{ $comida['tipo'] }}]"
-                                                  rows="3"
+                                                  rows="2"
                                                   data-dictado
-                                                  placeholder="{{ __('Ej.: tengo dos huevos, media palta, pan integral y café sin azúcar') }}"
-                                                  class="block w-full rounded-lg border-gray-300 pe-12 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">{{ old('ingredientes.'.$comida['tipo'], $comida['texto']) }}</textarea>
+                                                  placeholder="{{ __('huevos, queso chitagá y tinto') }}"
+                                                  class="tudi-input pe-14">{{ old('ingredientes.'.$comida['tipo'], $comida['texto']) }}</textarea>
 
                                         <button type="button"
                                                 data-boton-dictado="ingredientes-{{ $comida['tipo'] }}"
                                                 hidden
-                                                title="{{ __('Dictar por voz') }}"
                                                 aria-label="{{ __('Dictar por voz') }}"
-                                                class="absolute end-2 top-2 flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition">
+                                                class="absolute end-2 top-2 grid h-11 w-11 place-items-center rounded-full text-tudi-muted hover:bg-tudi-surface">
                                             <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm7-3a7 7 0 0 1-14 0m7 7v3" />
                                             </svg>
@@ -205,310 +209,249 @@
                                 @endif
 
                                 @if ($plan)
-                                    <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                                        <p class="text-sm font-medium text-gray-900">{{ $plan->descripcion }}</p>
-
-                                        @if ($plan->preparacion)
-                                            <p class="mt-1 text-sm text-gray-600">{{ $plan->preparacion }}</p>
-                                        @endif
+                                    <div class="tudi-card-inset mt-3 space-y-3 rounded-tudi-sm">
+                                        <p class="font-semibold leading-tight tracking-tudi-title">{{ $plan->descripcion }}</p>
 
                                         @if (! empty($plan->ingredientes_detalle))
-                                            <ul class="mt-3 divide-y divide-gray-200 text-sm">
+                                            <ul class="space-y-1.5">
                                                 @foreach ($plan->ingredientes_detalle as $ingrediente)
-                                                    <li class="flex flex-wrap items-baseline justify-between gap-x-3 py-2">
-                                                        <span class="text-gray-800">
-                                                            {{ $ingrediente['nombre'] }}
-                                                            <span class="text-gray-500">
-                                                                —
-                                                                @if (! empty($ingrediente['porcion']))
-                                                                    {{ $ingrediente['porcion'] }}
-                                                                    ({{ $kcal($ingrediente['cantidad_g'] ?? 0) }} g)
-                                                                @else
-                                                                    {{ $kcal($ingrediente['cantidad_g'] ?? 0) }} g
-                                                                @endif
-                                                            </span>
+                                                    <li class="flex items-baseline justify-between gap-3 text-[13px] text-tudi-ink-3">
+                                                        <span>
+                                                            {{ $ingrediente['nombre'] }} ·
+                                                            {{ $ingrediente['porcion'] ?? $kcal($ingrediente['cantidad_g'] ?? 0).' g' }}
                                                         </span>
-                                                        <span class="text-xs text-gray-500 whitespace-nowrap">
-                                                            {{ $kcal($ingrediente['calorias'] ?? 0) }} kcal ·
-                                                            P {{ $gramos($ingrediente['proteina_g'] ?? 0) }} g
-                                                        </span>
+                                                        <span class="tudi-meta">{{ $kcal($ingrediente['calorias'] ?? 0) }}</span>
                                                     </li>
                                                 @endforeach
                                             </ul>
                                         @endif
 
-                                        <p class="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-700">
-                                            <strong>{{ $kcal($plan->calorias_estimadas) }} kcal</strong> ·
-                                            P {{ $gramos($plan->proteina_g) }} g ·
-                                            G {{ $gramos($plan->grasa_g) }} g ·
-                                            C {{ $gramos($plan->carbohidratos_g) }} g
-                                        </p>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="tudi-chip tudi-chip-solid">{{ $kcal($plan->calorias_estimadas) }} kcal</span>
+                                            <span class="tudi-chip">P {{ $gramos($plan->proteina_g) }}</span>
+                                            <span class="tudi-chip">G {{ $gramos($plan->grasa_g) }}</span>
+                                            <span class="tudi-chip">C {{ $gramos($plan->carbohidratos_g) }}</span>
+                                        </div>
 
                                         @if ($plan->notas_ia)
-                                            <p class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{{ $plan->notas_ia }}</p>
+                                            <p class="tudi-note">{{ $plan->notas_ia }}</p>
                                         @endif
-                                    </div>
 
-                                    <div class="flex flex-wrap gap-2">
                                         @if ($comidaReal)
-                                            <div class="w-full rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
-                                                <p class="font-medium text-green-900">{{ __('Lo que realmente comiste') }}</p>
-                                                <p class="mt-1 text-green-800">
-                                                    {{ $kcal($comidaReal->calorias_reales) }} kcal ·
-                                                    P {{ $gramos($comidaReal->proteina_g) }} g ·
-                                                    G {{ $gramos($comidaReal->grasa_g) }} g ·
-                                                    C {{ $gramos($comidaReal->carbohidratos_g) }} g
-                                                </p>
+                                            <div class="border-t border-tudi-surface pt-3">
+                                                <p class="tudi-label">{{ __('Lo que comiste') }}</p>
+                                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                                    <span class="tudi-chip tudi-chip-lime">{{ $kcal($comidaReal->calorias_reales) }} kcal</span>
+                                                    <span class="tudi-chip">P {{ $gramos($comidaReal->proteina_g) }}</span>
+                                                    <span class="tudi-chip">G {{ $gramos($comidaReal->grasa_g) }}</span>
+                                                    <span class="tudi-chip">C {{ $gramos($comidaReal->carbohidratos_g) }}</span>
+                                                </div>
                                                 @if ($comidaReal->notas)
-                                                    <p class="mt-1 text-green-700">{{ $comidaReal->notas }}</p>
+                                                    <p class="mt-2 text-[13px] text-tudi-ink-3">{{ $comidaReal->notas }}</p>
                                                 @endif
                                                 @if ($comidaReal->imagenUrl())
-                                                    <img src="{{ $comidaReal->imagenUrl() }}" alt="{{ __('Evidencia visual') }}" class="mt-2 max-h-48 rounded-lg">
+                                                    <img src="{{ $comidaReal->imagenUrl() }}" alt="{{ __('Evidencia visual') }}"
+                                                         class="mt-2 max-h-48 rounded-tudi-sm">
                                                 @endif
                                             </div>
-                                        @else
-                                            <button type="submit" name="rehacer" value="{{ $comida['tipo'] }}"
-                                                    class="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                                {{ __('Rehacer solo el') }} {{ $comida['tipo'] }}
-                                            </button>
-                                            <a href="{{ route('comida-real.create', $plan) }}"
-                                               class="inline-flex min-h-[2.75rem] items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition">
-                                                {{ __('Registrar con detalle') }}
-                                            </a>
                                         @endif
                                     </div>
                                 @endif
+
+                                @unless ($comidaReal)
+                                    <div class="mt-3 flex gap-2">
+                                        @if ($plan)
+                                            <button type="submit" name="rehacer" value="{{ $comida['tipo'] }}"
+                                                    class="tudi-btn tudi-btn-secondary flex-1 lg:flex-none">
+                                                {{ __('Rehacer') }}
+                                            </button>
+                                            <a href="{{ route('comida-real.create', $plan) }}"
+                                               class="tudi-btn tudi-btn-primary flex-1 no-underline lg:flex-none">
+                                                {{ __('Registrar') }}
+                                            </a>
+                                        @else
+                                            <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block">
+                                                {{ __('Generar distribución') }}
+                                            </button>
+                                        @endif
+                                    </div>
+                                @endunless
                             </div>
-                        </div>
+                        </details>
                     @endforeach
+                </div>
+            </form>
+        </section>
 
-                    <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6">
-                        <button type="submit"
-                                class="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="m5 3 1.5 3.5L10 8 6.5 9.5 5 13l-1.5-3.5L0 8l3.5-1.5L5 3Zm11 2 2 4.5L23 12l-5 2.5L16 19l-2-4.5L9 12l5-2.5L16 5Z" />
-                            </svg>
-                            {{ __('Generar distribución') }}
-                        </button>
-                        <p class="mt-2 text-xs text-gray-500">
-                            {{ __('Se resuelven solo las comidas nuevas o cuyo texto hayas cambiado. Lo que ya está generado se respeta.') }}
-                        </p>
+        </div>
+
+        {{-- ══ Actividad física ══ --}}
+        <section class="space-y-3">
+            <p class="tudi-label px-1">{{ __('Actividad física') }}</p>
+
+            <div class="tudi-card p-5">
+                <div class="flex items-end justify-between gap-3">
+                    <span class="tudi-label pb-1">{{ __('Objetivo de hoy') }}</span>
+                    <span class="flex items-baseline gap-1.5">
+                        <span class="tudi-num text-[28px]">{{ $kcal($actividad['calorias_objetivo_actividad']) }}</span>
+                        <span class="tudi-meta">kcal</span>
+                    </span>
+                </div>
+
+                <ul class="mt-4 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                    @foreach ($actividad['sugerencias'] as $sugerencia)
+                        <li class="flex items-center justify-between gap-2 rounded-tudi-sm bg-tudi-card-inset px-4 py-3">
+                            <span class="text-sm capitalize">{{ $sugerencia['tipo'] }}</span>
+                            <span class="tudi-meta text-end">
+                                {{ $sugerencia['duracion_min'] }} min · {{ $kcal($sugerencia['calorias_estimadas']) }} kcal
+                            </span>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+
+            <div class="tudi-card p-5">
+                <form method="post" action="{{ route('actividades.store', $registroDiario) }}" class="space-y-3">
+                    @csrf
+
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                        <div>
+                            <label for="tipo_actividad" class="tudi-label">{{ __('Actividad') }}</label>
+                            <input id="tipo_actividad" name="tipo_actividad" type="text" list="tipos-de-actividad" required
+                                   value="{{ old('tipo_actividad') }}" placeholder="{{ __('caminata') }}"
+                                   class="tudi-input mt-1">
+                            <datalist id="tipos-de-actividad">
+                                @foreach ($actividad['sugerencias'] as $sugerencia)
+                                    <option value="{{ $sugerencia['tipo'] }}"></option>
+                                @endforeach
+                            </datalist>
+                        </div>
+                        <div>
+                            <label for="duracion_min" class="tudi-label">{{ __('Minutos') }}</label>
+                            <input id="duracion_min" name="duracion_min" type="number" inputmode="numeric" min="1" required
+                                   value="{{ old('duracion_min') }}" placeholder="45" class="tudi-input mt-1">
+                        </div>
+                        <div>
+                            <label for="calorias_dispositivo" class="tudi-label">{{ __('Kcal quemadas') }}</label>
+                            <input id="calorias_dispositivo" name="calorias_dispositivo" type="number" inputmode="decimal" step="0.01" min="0" required
+                                   value="{{ old('calorias_dispositivo') }}" placeholder="320" class="tudi-input mt-1">
+                        </div>
+                        <div>
+                            <label for="pasos" class="tudi-label">{{ __('Pasos') }}</label>
+                            <input id="pasos" name="pasos" type="number" inputmode="numeric" min="0"
+                                   value="{{ old('pasos') }}" placeholder="8.000" class="tudi-input mt-1">
+                        </div>
+                        <div>
+                            <label for="fuente" class="tudi-label">{{ __('Fuente') }}</label>
+                            <select id="fuente" name="fuente" required class="tudi-input mt-1">
+                                <option value="manual" @selected(old('fuente') === 'manual')>{{ __('Manual') }}</option>
+                                <option value="dispositivo" @selected(old('fuente') === 'dispositivo')>{{ __('Dispositivo') }}</option>
+                            </select>
+                        </div>
                     </div>
+
+                    <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block sm:w-auto">
+                        {{ __('Guardar actividad') }}
+                    </button>
                 </form>
-            </section>
 
-            {{-- ══ 2. Actividad física ══ --}}
-            <section class="space-y-3 sm:space-y-4">
-                <h3 class="px-1 text-base sm:text-lg font-semibold text-gray-900">{{ __('2. Actividad física') }}</h3>
-
-                <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6">
-                    <div class="flex flex-wrap items-baseline justify-between gap-2">
-                        <p class="text-sm text-gray-600">
-                            {{ __('Según tu Calculadora Déficit, hoy te conviene quemar') }}
-                        </p>
-                        <span class="text-xl font-bold text-indigo-600">
-                            {{ $kcal($actividad['calorias_objetivo_actividad']) }} <span class="text-sm font-medium">kcal</span>
-                        </span>
-                    </div>
-                    <p class="mt-1 text-xs text-gray-500">
-                        {{ __('Equivale al 40% de tu déficit diario de') }} {{ $kcal($actividad['deficit_dieta_kcal']) }} {{ __('kcal. Elige una opción:') }}
-                    </p>
-
-                    <ul class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                        @foreach ($actividad['sugerencias'] as $sugerencia)
-                            <li class="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2.5">
-                                <span class="text-sm font-medium text-gray-800 capitalize">{{ $sugerencia['tipo'] }}</span>
-                                <span class="text-xs text-gray-500 text-end">
-                                    {{ $sugerencia['duracion_min'] }} min<br>
-                                    ≈ {{ $kcal($sugerencia['calorias_estimadas']) }} kcal
-                                </span>
+                @if ($actividades->isNotEmpty())
+                    <ul class="mt-5 space-y-1.5 border-t border-tudi-divider pt-4">
+                        @foreach ($actividades as $registro)
+                            <li class="flex items-baseline justify-between gap-3 text-sm">
+                                <span class="capitalize">{{ $registro->tipo }} · {{ $registro->duracion_min }} min</span>
+                                <span class="tudi-meta">{{ $kcal($registro->calorias_ajustadas) }} kcal</span>
                             </li>
                         @endforeach
                     </ul>
+                @endif
+            </div>
+        </section>
 
-                    @unless (collect($actividad['sugerencias'])->every(fn ($s) => $s['alcanza_objetivo']))
-                        <p class="mt-3 text-xs text-gray-500">
-                            {{ __('Las opciones de menor intensidad se muestran recortadas a 90 minutos: con esa duración quemas menos de tu objetivo.') }}
-                        </p>
-                    @endunless
-                </div>
+        {{-- ══ Cierre del día ══ --}}
+        <section class="space-y-3">
+            <p class="tudi-label px-1">{{ __('Cierre del día') }}</p>
 
-                <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6">
-                    <h4 class="text-sm font-semibold text-gray-900">{{ __('Reporta lo que hiciste') }}</h4>
-                    <p class="mt-1 text-xs text-gray-500">
-                        {{ __('Las calorías de tu dispositivo se ajustan automáticamente con el factor de corrección de cada tipo de actividad.') }}
+            <div class="tudi-card p-5">
+                <div class="flex items-start justify-between gap-3">
+                    <p class="text-base font-semibold tracking-tudi-title">
+                        {{ $registroDiario->cerrado ? __('Resumen del cierre') : __('Vista previa (todavía sin cerrar)') }}
                     </p>
 
-                    <form method="post" action="{{ route('actividades.store', $registroDiario) }}" class="mt-4 space-y-4">
-                        @csrf
-
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                            <div class="lg:col-span-1">
-                                <x-input-label for="tipo_actividad" :value="__('Actividad')" />
-                                <input id="tipo_actividad" name="tipo_actividad" type="text" list="tipos-de-actividad" required
-                                       value="{{ old('tipo_actividad') }}"
-                                       class="mt-1 block w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                                <datalist id="tipos-de-actividad">
-                                    @foreach ($actividad['sugerencias'] as $sugerencia)
-                                        <option value="{{ $sugerencia['tipo'] }}"></option>
-                                    @endforeach
-                                </datalist>
-                            </div>
-                            <div>
-                                <x-input-label for="duracion_min" :value="__('Duración (min)')" />
-                                <input id="duracion_min" name="duracion_min" type="number" inputmode="numeric" min="1" required
-                                       value="{{ old('duracion_min') }}"
-                                       class="mt-1 block w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <x-input-label for="calorias_dispositivo" :value="__('Calorías quemadas')" />
-                                <input id="calorias_dispositivo" name="calorias_dispositivo" type="number" inputmode="decimal" step="0.01" min="0" required
-                                       value="{{ old('calorias_dispositivo') }}"
-                                       class="mt-1 block w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <x-input-label for="pasos" :value="__('Pasos (opcional)')" />
-                                <input id="pasos" name="pasos" type="number" inputmode="numeric" min="0"
-                                       value="{{ old('pasos') }}"
-                                       class="mt-1 block w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                            </div>
-                            <div>
-                                <x-input-label for="fuente" :value="__('Fuente')" />
-                                <select id="fuente" name="fuente" required
-                                        class="mt-1 block w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                                    <option value="manual" @selected(old('fuente') === 'manual')>{{ __('Manual') }}</option>
-                                    <option value="dispositivo" @selected(old('fuente') === 'dispositivo')>{{ __('Dispositivo') }}</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <button type="submit"
-                                class="w-full sm:w-auto inline-flex items-center justify-center rounded-lg bg-gray-800 px-5 py-3 text-sm font-semibold text-white hover:bg-gray-700 transition">
-                            {{ __('Guardar actividad') }}
-                        </button>
-                    </form>
-
-                    @if ($actividades->isNotEmpty())
-                        <ul class="mt-5 divide-y divide-gray-100 border-t border-gray-100 pt-2 text-sm">
-                            @foreach ($actividades as $registro)
-                                <li class="flex flex-wrap items-baseline justify-between gap-x-3 py-2">
-                                    <span class="text-gray-800 capitalize">
-                                        {{ $registro->tipo }} — {{ $registro->duracion_min }} min
-                                        @if ($registro->pasos)
-                                            · {{ $kcal($registro->pasos) }} {{ __('pasos') }}
-                                        @endif
-                                    </span>
-                                    <span class="text-xs text-gray-500">
-                                        {{ $kcal($registro->calorias_dispositivo) }} × {{ $registro->factor_correccion }}
-                                        = <strong class="text-gray-700">{{ $kcal($registro->calorias_ajustadas) }} kcal</strong>
-                                    </span>
-                                </li>
-                            @endforeach
-                        </ul>
+                    @if ($registroDiario->cerrado)
+                        <form method="post" action="{{ route('cierre.reabrir', $registroDiario) }}">
+                            @csrf
+                            <button type="submit" class="tudi-btn tudi-btn-secondary">{{ __('Reabrir mi día') }}</button>
+                        </form>
                     @endif
                 </div>
-            </section>
 
-            {{-- ══ 3. Cierre del día ══ --}}
-            <section class="space-y-3 sm:space-y-4">
-                <h3 class="px-1 text-base sm:text-lg font-semibold text-gray-900">{{ __('3. Cierre del día') }}</h3>
-
-                <div class="bg-white shadow-sm rounded-xl p-4 sm:p-6">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <h4 class="text-sm font-semibold text-gray-900">
-                                {{ $registroDiario->cerrado ? __('Resumen del cierre') : __('Vista previa (todavía sin cerrar)') }}
-                            </h4>
-                            <p class="mt-1 text-xs text-gray-500">
-                                @if ($registroDiario->cerrado)
-                                    {{ __('Cerrado el') }} {{ $registroDiario->cerrado_en?->format('d/m/Y H:i') }}.
-                                    {{ __('Reábrelo para poder corregir comidas o actividad.') }}
-                                @else
-                                    {{ __('Al cerrar el día se congelan sus cifras y se actualizan tus indicadores y tu progreso.') }}
-                                @endif
-                            </p>
-                        </div>
-
-                        @if ($registroDiario->cerrado)
-                            <form method="post" action="{{ route('cierre.reabrir', $registroDiario) }}">
-                                @csrf
-                                <button type="submit"
-                                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                    {{ __('Reabrir mi día') }}
-                                </button>
-                            </form>
-                        @endif
+                <dl class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div>
+                        <dt class="tudi-label">{{ __('Consumidas') }}</dt>
+                        <dd class="tudi-num mt-1 text-xl">{{ $kcal($resumenCierre['calorias_consumidas']) }}</dd>
                     </div>
+                    <div>
+                        <dt class="tudi-label">{{ __('Actividad') }}</dt>
+                        <dd class="tudi-num mt-1 text-xl">{{ $kcal($resumenCierre['calorias_actividad_ajustada']) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="tudi-label">{{ __('Déficit') }}</dt>
+                        <dd @class([
+                            'tudi-num mt-1 text-xl',
+                            'text-tudi-lime-700' => $resumenCierre['deficit_diario'] >= 0,
+                            'text-tudi-amber-ink' => $resumenCierre['deficit_diario'] < 0,
+                        ])>{{ $kcal($resumenCierre['deficit_diario']) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="tudi-label">{{ __('Proteína') }}</dt>
+                        <dd class="tudi-num mt-1 text-xl">{{ number_format($resumenCierre['cumplimiento_proteina_pct'], 1, ',', '.') }}%</dd>
+                    </div>
+                </dl>
 
-                    <dl class="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
-                        <div class="rounded-lg bg-gray-50 p-3">
-                            <dt class="text-xs text-gray-500">{{ __('Consumidas / objetivo') }}</dt>
-                            <dd class="mt-0.5 text-sm font-semibold text-gray-900">
-                                {{ $kcal($resumenCierre['calorias_consumidas']) }} / {{ $kcal($resumenCierre['calorias_objetivo']) }} kcal
-                            </dd>
-                        </div>
-                        <div class="rounded-lg bg-gray-50 p-3">
-                            <dt class="text-xs text-gray-500">{{ __('Gasto por actividad') }}</dt>
-                            <dd class="mt-0.5 text-sm font-semibold text-gray-900">
-                                {{ $kcal($resumenCierre['calorias_actividad_ajustada']) }} kcal
-                            </dd>
-                        </div>
-                        <div class="rounded-lg bg-gray-50 p-3">
-                            <dt class="text-xs text-gray-500">{{ __('Déficit estimado') }}</dt>
-                            <dd class="mt-0.5 text-sm font-semibold {{ $resumenCierre['deficit_diario'] >= 0 ? 'text-green-700' : 'text-red-700' }}">
-                                {{ $kcal($resumenCierre['deficit_diario']) }} kcal
-                            </dd>
-                        </div>
-                        <div class="rounded-lg bg-gray-50 p-3">
-                            <dt class="text-xs text-gray-500">{{ __('Proteína cumplida') }}</dt>
-                            <dd class="mt-0.5 text-sm font-semibold text-gray-900">
-                                {{ number_format($resumenCierre['cumplimiento_proteina_pct'], 1, ',', '.') }}%
-                            </dd>
-                        </div>
-                    </dl>
+                @unless ($registroDiario->cerrado)
+                    <form method="post" action="{{ route('cierre.cerrar', $registroDiario) }}" class="mt-5 border-t border-tudi-divider pt-5">
+                        @csrf
 
-                    @unless ($registroDiario->cerrado)
-                        {{-- Feedback de cumplimiento: la única entrada del cierre. --}}
-                        <form method="post" action="{{ route('cierre.cerrar', $registroDiario) }}" class="mt-5 border-t border-gray-100 pt-4 space-y-4">
-                            @csrf
+                        @if ($comidasPorConfirmar->isNotEmpty())
+                            <p class="text-base font-semibold tracking-tudi-title">{{ __('¿Cumpliste con lo sugerido?') }}</p>
 
-                            @if ($comidasPorConfirmar->isNotEmpty())
-                                <div>
-                                    <h4 class="text-sm font-semibold text-gray-900">{{ __('¿Cumpliste con lo sugerido?') }}</h4>
-                                    <p class="mt-1 text-xs text-gray-500">
-                                        {{ __('Marca la casilla si comiste lo planificado, o cuéntanos qué comiste de verdad y lo interpretamos por ti.') }}
-                                    </p>
-                                </div>
-
+                            <div class="mt-3 space-y-2.5">
                                 @foreach ($comidasPorConfirmar as $comida)
-                                    <div class="rounded-lg border border-gray-200 p-3 sm:p-4">
-                                        <div class="flex flex-wrap items-center justify-between gap-2">
-                                            <p class="text-sm font-semibold text-gray-900 capitalize">{{ $comida['tipo'] }}</p>
-                                            <span class="text-xs text-gray-500">
-                                                {{ __('Sugerido:') }} {{ $kcal($comida['plan']->calorias_estimadas) }} kcal
-                                            </span>
+                                    <div class="rounded-tudi-md border border-tudi-border p-4" x-data="{ cumplio: false }">
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex-1">
+                                                <p class="font-semibold capitalize tracking-tudi-title">{{ $comida['tipo'] }}</p>
+                                                <p class="tudi-label mt-0.5">
+                                                    {{ __('Sugerido') }} {{ $kcal($comida['plan']->calorias_estimadas) }} kcal
+                                                </p>
+                                            </div>
+
+                                            <label class="flex flex-none cursor-pointer items-center">
+                                                <input type="checkbox" name="feedback[{{ $comida['tipo'] }}][cumplio]" value="1"
+                                                       x-model="cumplio" class="peer sr-only">
+                                                <span class="tudi-switch"></span>
+                                                <span class="sr-only">{{ __('Sí, comí lo que se sugirió') }}</span>
+                                            </label>
                                         </div>
 
-                                        <label class="mt-2 flex items-center gap-2 text-sm text-gray-700">
-                                            <input type="checkbox" name="feedback[{{ $comida['tipo'] }}][cumplio]" value="1"
-                                                   class="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                                            {{ __('Sí, comí lo que se sugirió') }}
-                                        </label>
-
-                                        <div class="relative mt-2">
+                                        {{-- Un solo campo, y solo si el interruptor dice que no. --}}
+                                        <div class="relative mt-3" x-show="! cumplio">
+                                            <label for="feedback-{{ $comida['tipo'] }}" class="sr-only">
+                                                {{ __('Qué comiste en el') }} {{ $comida['tipo'] }}
+                                            </label>
                                             <textarea id="feedback-{{ $comida['tipo'] }}"
                                                       name="feedback[{{ $comida['tipo'] }}][texto]"
                                                       rows="2"
                                                       data-dictado
-                                                      placeholder="{{ __('O cuéntanos qué comiste: “al final me comí un sándwich de pollo y una gaseosa”') }}"
-                                                      class="block w-full rounded-lg border-gray-300 pe-12 text-base shadow-sm focus:border-indigo-500 focus:ring-indigo-500">{{ old('feedback.'.$comida['tipo'].'.texto') }}</textarea>
+                                                      placeholder="{{ __('Cuéntanos qué comiste de verdad…') }}"
+                                                      class="tudi-input pe-14">{{ old('feedback.'.$comida['tipo'].'.texto') }}</textarea>
 
                                             <button type="button"
                                                     data-boton-dictado="feedback-{{ $comida['tipo'] }}"
                                                     hidden
-                                                    title="{{ __('Dictar por voz') }}"
                                                     aria-label="{{ __('Dictar por voz') }}"
-                                                    class="absolute end-2 top-2 flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-indigo-600 transition">
+                                                    class="absolute end-2 top-2 grid h-11 w-11 place-items-center rounded-full text-tudi-muted hover:bg-tudi-surface">
                                                 <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm7-3a7 7 0 0 1-14 0m7 7v3" />
                                                 </svg>
@@ -516,121 +459,213 @@
                                         </div>
                                     </div>
                                 @endforeach
-                            @endif
-
-                            <button type="submit"
-                                    class="w-full sm:w-auto inline-flex items-center justify-center rounded-lg bg-green-600 px-5 py-3 text-sm font-semibold text-white hover:bg-green-700 transition">
-                                {{ __('Cerrar mi día') }}
-                            </button>
-                        </form>
-                    @endunless
-
-                    <div class="mt-5 border-t border-gray-100 pt-4">
-                        <h4 class="text-sm font-semibold text-gray-900">{{ __('Recomendaciones') }}</h4>
-
-                        @if ($resumenCierre['recomendaciones']->isEmpty())
-                            <p class="mt-1 text-xs text-gray-500">
-                                {{ __('Sin recomendaciones para este día. Los ajustes se basan en promedios móviles de 7 días y siempre requieren tu confirmación.') }}
-                            </p>
-                        @else
-                            <ul class="mt-2 divide-y divide-gray-100 text-sm">
-                                @foreach ($resumenCierre['recomendaciones'] as $recomendacion)
-                                    <li class="py-3">
-                                        <p class="text-gray-800">{{ $recomendacion->justificacion }}</p>
-                                        <p class="mt-0.5 text-xs text-gray-500">
-                                            {{ __($recomendacion->estado) }}
-                                            @if ($recomendacion->calorias_objetivo_sugeridas)
-                                                · {{ $kcal($recomendacion->calorias_objetivo_sugeridas) }} kcal
-                                            @endif
-                                        </p>
-
-                                        @if ($recomendacion->estado === 'pendiente')
-                                            <div class="mt-2 flex flex-wrap gap-2">
-                                                <form method="post" action="{{ route('recomendaciones.confirmar', $recomendacion) }}">
-                                                    @csrf
-                                                    <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition">
-                                                        {{ __('Confirmar') }}
-                                                    </button>
-                                                </form>
-                                                <form method="post" action="{{ route('recomendaciones.rechazar', $recomendacion) }}">
-                                                    @csrf
-                                                    <button type="submit" class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                                        {{ __('Rechazar') }}
-                                                    </button>
-                                                </form>
-                                            </div>
-                                        @endif
-                                    </li>
-                                @endforeach
-                            </ul>
+                            </div>
                         @endif
-                    </div>
-                </div>
-            </section>
 
-            @endif
-        </div>
+                        <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block mt-4 gap-2.5">
+                            {{ __('Cerrar mi día') }}
+                            <span class="h-2 w-2 rounded-full bg-tudi-lime"></span>
+                        </button>
+                        <p class="mt-2.5 text-center text-xs text-tudi-muted">
+                            {{ __('Al cerrar se congelan tus cifras del día.') }}
+                        </p>
+                    </form>
+                @endunless
+
+                <div class="mt-5 border-t border-tudi-divider pt-5">
+                    <p class="tudi-label">{{ __('Recomendaciones') }}</p>
+
+                    @if ($resumenCierre['recomendaciones']->isEmpty())
+                        <p class="mt-2 text-sm text-tudi-muted">{{ __('Sin recomendaciones para este día.') }}</p>
+                    @else
+                        <ul class="mt-3 space-y-4">
+                            @foreach ($resumenCierre['recomendaciones'] as $recomendacion)
+                                <li>
+                                    <p class="text-sm">{{ $recomendacion->justificacion }}</p>
+                                    <p class="tudi-meta mt-1">
+                                        {{ __($recomendacion->estado) }}
+                                        @if ($recomendacion->calorias_objetivo_sugeridas)
+                                            · {{ $kcal($recomendacion->calorias_objetivo_sugeridas) }} kcal
+                                        @endif
+                                    </p>
+
+                                    @if ($recomendacion->estado === 'pendiente')
+                                        <div class="mt-3 flex flex-wrap gap-2">
+                                            <form method="post" action="{{ route('recomendaciones.confirmar', $recomendacion) }}">
+                                                @csrf
+                                                <button type="submit" class="tudi-btn tudi-btn-primary">{{ __('Confirmar') }}</button>
+                                            </form>
+                                            <form method="post" action="{{ route('recomendaciones.rechazar', $recomendacion) }}">
+                                                @csrf
+                                                <button type="submit" class="tudi-btn tudi-btn-secondary">{{ __('Rechazar') }}</button>
+                                            </form>
+                                        </div>
+                                    @endif
+                                </li>
+                            @endforeach
+                        </ul>
+                    @endif
+                </div>
+            </div>
+        </section>
     </div>
+
+    @endif
 
     @push('scripts')
         <script>
-            // Dictado por voz con la Web Speech API del navegador: sin ninguna
-            // dependencia nueva y sin enviar audio a ningún servicio propio.
-            // Si el navegador no la soporta, los botones quedan ocultos y el
-            // usuario escribe a mano (CLAUDE.md sección 4.12).
-            document.addEventListener('DOMContentLoaded', function () {
-                var Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
+            (function () {
+                // ── Acordeón: solo una comida abierta a la vez ──
+                // El evento `toggle` no burbujea, así que se escucha en captura.
+                document.addEventListener('toggle', function (evento) {
+                    var detalle = evento.target;
 
-                if (! Reconocimiento) {
-                    return;
-                }
-
-                document.querySelectorAll('[data-boton-dictado]').forEach(function (boton) {
-                    var campo = document.getElementById(boton.dataset.botonDictado);
-
-                    if (! campo) {
+                    if (! detalle.matches || ! detalle.matches('details[data-comida]') || ! detalle.open) {
                         return;
                     }
 
-                    boton.hidden = false;
+                    document.querySelectorAll('details[data-comida]').forEach(function (otro) {
+                        if (otro !== detalle) {
+                            otro.open = false;
+                        }
+                    });
+                }, true);
 
-                    var reconocimiento = new Reconocimiento();
-                    reconocimiento.lang = 'es-ES';
-                    reconocimiento.interimResults = false;
-                    reconocimiento.continuous = false;
+                // ── Dictado por voz (Web Speech API del navegador) ──
+                // Sin dependencias nuevas y sin que el audio pase por nuestro
+                // servidor. Si el navegador no la soporta, los botones quedan
+                // ocultos y el usuario escribe a mano (CLAUDE.md sección 4.12).
+                function configurarDictado(raiz) {
+                    var Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-                    var escuchando = false;
+                    if (! Reconocimiento) {
+                        return;
+                    }
 
-                    boton.addEventListener('click', function () {
-                        if (escuchando) {
-                            reconocimiento.stop();
+                    raiz.querySelectorAll('[data-boton-dictado]').forEach(function (boton) {
+                        var campo = document.getElementById(boton.dataset.botonDictado);
+
+                        if (! campo || boton.dataset.dictadoListo) {
                             return;
                         }
 
-                        try {
-                            reconocimiento.start();
-                        } catch (error) {
-                            return;
-                        }
+                        boton.dataset.dictadoListo = '1';
+                        boton.hidden = false;
 
-                        escuchando = true;
-                        boton.classList.add('text-red-600', 'animate-pulse');
-                    });
+                        var reconocimiento = new Reconocimiento();
+                        reconocimiento.lang = 'es-ES';
+                        reconocimiento.interimResults = false;
+                        reconocimiento.continuous = false;
 
-                    reconocimiento.addEventListener('result', function (evento) {
-                        var texto = evento.results[0][0].transcript;
-                        campo.value = campo.value ? campo.value.trim() + ' ' + texto : texto;
-                        campo.dispatchEvent(new Event('input'));
-                    });
+                        var escuchando = false;
 
-                    ['end', 'error'].forEach(function (evento) {
-                        reconocimiento.addEventListener(evento, function () {
-                            escuchando = false;
-                            boton.classList.remove('text-red-600', 'animate-pulse');
+                        boton.addEventListener('click', function () {
+                            if (escuchando) {
+                                reconocimiento.stop();
+
+                                return;
+                            }
+
+                            try {
+                                reconocimiento.start();
+                            } catch (error) {
+                                return;
+                            }
+
+                            escuchando = true;
+                            boton.classList.add('text-tudi-amber-ink', 'animate-pulse');
+                        });
+
+                        reconocimiento.addEventListener('result', function (evento) {
+                            var texto = evento.results[0][0].transcript;
+                            campo.value = campo.value ? campo.value.trim() + ' ' + texto : texto;
+                            campo.dispatchEvent(new Event('input'));
+                        });
+
+                        ['end', 'error'].forEach(function (nombre) {
+                            reconocimiento.addEventListener(nombre, function () {
+                                escuchando = false;
+                                boton.classList.remove('text-tudi-amber-ink', 'animate-pulse');
+                            });
                         });
                     });
+                }
+
+                // ── Guardar sin recargar la página ──
+                // El formulario se manda por fetch; la respuesta del redirect
+                // trae la página ya recalculada y solo se reemplazan el panel
+                // de objetivo, la lista de comidas y los avisos. Sin JS (o si
+                // algo falla) el mismo formulario se envía de forma normal.
+                var SECCIONES = ['#tudi-avisos', '#panel-objetivo', '#lista-comidas'];
+
+                document.addEventListener('submit', function (evento) {
+                    var formulario = evento.target.closest('form[data-fetch]');
+
+                    if (! formulario || ! window.fetch || ! window.DOMParser) {
+                        return;
+                    }
+
+                    evento.preventDefault();
+
+                    var datos = new FormData(formulario);
+                    // `submitter` no existe en navegadores viejos: sin el se
+                    // perderia el valor de "Rehacer".
+                    var enviador = evento.submitter || document.activeElement;
+
+                    if (enviador && enviador.name && enviador.form === formulario) {
+                        datos.append(enviador.name, enviador.value);
+                    }
+
+                    var comidaAbierta = document.querySelector('details[data-comida][open]');
+                    comidaAbierta = comidaAbierta ? comidaAbierta.dataset.comida : null;
+
+                    document.body.setAttribute('aria-busy', 'true');
+
+                    fetch(formulario.action, {
+                        method: 'POST',
+                        body: datos,
+                        credentials: 'same-origin',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' },
+                    })
+                        .then(function (respuesta) {
+                            if (! respuesta.ok) {
+                                throw new Error('respuesta no válida');
+                            }
+
+                            return respuesta.text();
+                        })
+                        .then(function (html) {
+                            var recibido = new DOMParser().parseFromString(html, 'text/html');
+
+                            SECCIONES.forEach(function (selector) {
+                                var nuevo = recibido.querySelector(selector);
+                                var actual = document.querySelector(selector);
+
+                                if (nuevo && actual) {
+                                    actual.replaceWith(nuevo);
+                                }
+                            });
+
+                            if (comidaAbierta) {
+                                document.querySelectorAll('details[data-comida]').forEach(function (detalle) {
+                                    detalle.open = detalle.dataset.comida === comidaAbierta;
+                                });
+                            }
+
+                            document.body.removeAttribute('aria-busy');
+                            configurarDictado(document);
+                        })
+                        .catch(function () {
+                            // Cualquier problema: se envía como un formulario normal.
+                            formulario.removeAttribute('data-fetch');
+                            formulario.submit();
+                        });
                 });
-            });
+
+                document.addEventListener('DOMContentLoaded', function () {
+                    configurarDictado(document);
+                });
+            })();
         </script>
     @endpush
 </x-app-layout>

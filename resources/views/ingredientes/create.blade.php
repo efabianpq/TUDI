@@ -1,19 +1,19 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-lg sm:text-xl text-gray-800 leading-tight">
+        <h2 class="font-semibold text-lg sm:text-xl text-tudi-ink leading-tight">
             {{ __('Ingredientes disponibles de hoy') }}
         </h2>
     </x-slot>
 
     <div class="py-6 sm:py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-            <div class="p-4 sm:p-8 bg-white shadow-sm rounded-xl">
+            <div class="p-4 sm:p-8 bg-tudi-card shadow-sm rounded-tudi-lg">
                 <section x-data="ingredientesForm()">
                     <header>
-                        <h2 class="text-lg font-medium text-gray-900">
+                        <h2 class="text-lg font-medium text-tudi-ink">
                             {{ __('Reportar ingredientes') }}
                         </h2>
-                        <p class="mt-1 text-sm text-gray-600">
+                        <p class="mt-1 text-sm text-tudi-ink-3">
                             {{ __('Agrega todos los ingredientes que tienes disponibles hoy.') }}
                         </p>
                     </header>
@@ -48,20 +48,20 @@
                                     <x-text-input type="number" step="0.01" min="0" class="mt-1 block w-full" :name="null" x-bind:name="`ingredientes[${index}][carbohidratos_por_100g]`" x-model="ingrediente.carbohidratos_por_100g" required />
                                 </div>
                                 <div class="sm:col-span-6">
-                                    <button type="button" class="text-sm text-red-600" @click="quitar(index)">{{ __('Quitar fila') }}</button>
+                                    <button type="button" class="text-sm text-tudi-amber-ink" @click="quitar(index)">{{ __('Quitar fila') }}</button>
                                 </div>
                             </div>
                         </template>
 
                         <x-input-error class="mt-2" :messages="$errors->get('ingredientes')" />
 
-                        <button type="button" class="text-sm text-indigo-600" @click="agregar()">{{ __('+ Agregar ingrediente') }}</button>
+                        <button type="button" class="text-sm text-tudi-lime-700" @click="agregar()">{{ __('+ Agregar ingrediente') }}</button>
 
                         <div class="flex items-center gap-4">
                             <x-primary-button>{{ __('Guardar') }}</x-primary-button>
 
                             @if (session('status') === 'ingredientes-guardados')
-                                <p class="text-sm text-gray-600">{{ __('Guardado.') }}</p>
+                                <p class="text-sm text-tudi-ink-3">{{ __('Guardado.') }}</p>
                             @endif
                         </div>
                     </form>
@@ -69,8 +69,8 @@
             </div>
 
             @if ($ingredientes->isNotEmpty())
-                <div class="p-4 sm:p-8 bg-white shadow-sm rounded-xl">
-                    <h2 class="text-lg font-medium text-gray-900">{{ __('Ya reportados hoy') }}</h2>
+                <div class="p-4 sm:p-8 bg-tudi-card shadow-sm rounded-tudi-lg">
+                    <h2 class="text-lg font-medium text-tudi-ink">{{ __('Ya reportados hoy') }}</h2>
                     <ul class="mt-4 divide-y">
                         @foreach ($ingredientes as $ingrediente)
                             <li class="py-2 flex items-center justify-between">
@@ -78,7 +78,7 @@
                                 <form method="post" action="{{ route('ingredientes.destroy', $ingrediente) }}">
                                     @csrf
                                     @method('delete')
-                                    <button type="submit" class="text-sm text-red-600">{{ __('Eliminar') }}</button>
+                                    <button type="submit" class="text-sm text-tudi-amber-ink">{{ __('Eliminar') }}</button>
                                 </form>
                             </li>
                         @endforeach

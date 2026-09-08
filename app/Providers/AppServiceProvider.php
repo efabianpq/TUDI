@@ -6,6 +6,7 @@ use App\Services\AI\GeminiMealDistributionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\NutritionAiProviderInterface;
 use App\Services\AI\RuleBasedNutritionProvider;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -33,6 +34,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Las fechas que se muestran al usuario van en español ("lunes 07 de
+        // septiembre"). Solo se toca el locale de Carbon, no el de la
+        // aplicación: `config('app.locale')` sigue en `en` y con él los
+        // mensajes de validación del framework.
+        Carbon::setLocale('es');
     }
 }

@@ -106,11 +106,10 @@ it('absorbe lo que antes era "Mi progreso": promedios móviles, consistencia y g
 
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
-        ->assertSee('Peso (promedio móvil 7 días)')
+        ->assertSee('Peso · media 7 días')
         ->assertSee('80,00 kg')
-        ->assertSee('Déficit promedio (7 días)')
-        ->assertSee('Índice de consistencia')
-        ->assertSee('100%')
+        ->assertSee('Déficit promedio')
+        ->assertSee('Racha')
         ->assertSee('7 de 7 días cerrados');
 });
 

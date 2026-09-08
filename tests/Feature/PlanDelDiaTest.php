@@ -178,9 +178,9 @@ test('the plan detail shows the three sections of the daily flow', function () {
     $response = $this->actingAs($usuario)->get(route('planes.show', $registroDiario));
 
     $response->assertOk()
-        ->assertSee('1. Cálculo alimenticio')
-        ->assertSee('2. Actividad física')
-        ->assertSee('3. Cierre del día')
+        ->assertSee('Cálculo alimenticio')
+        ->assertSee('Actividad física')
+        ->assertSee('Cierre del día')
         ->assertSee('desayuno')
         ->assertSee('almuerzo')
         ->assertSee('cena')
@@ -211,7 +211,7 @@ test('a user without nutritional parameters is sent to the calculator instead of
     $response->assertOk()
         ->assertSee('Calculadora Déficit')
         ->assertSee('Ir a la Calculadora Déficit')
-        ->assertDontSee('1. Cálculo alimenticio');
+        ->assertDontSee('Cálculo alimenticio');
 });
 
 test('one single button distributes every meal that has text, in one call', function () {

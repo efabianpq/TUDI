@@ -3,27 +3,27 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-        <meta name="theme-color" content="#4f46e5">
+        <meta name="theme-color" content="#171512">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>{{ config('app.name', 'TUDI') }}</title>
 
-        <!-- Fonts -->
-        <link rel="preconnect" href="https://fonts.bunny.net">
-        <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap">
 
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="font-sans text-gray-900 antialiased">
-        <div class="min-h-screen flex flex-col sm:justify-center items-center pt-8 sm:pt-0 px-4 sm:px-0 bg-gray-100">
-            <div>
-                <a href="/">
-                    <x-application-logo class="w-20 h-20 fill-current text-gray-500" />
-                </a>
-            </div>
+    <body class="min-h-screen bg-tudi-bg font-sans text-tudi-ink antialiased">
+        <div class="flex min-h-screen flex-col items-center justify-center px-4 py-10">
+            <a href="/" class="text-tudi-ink no-underline">
+                <x-tudi.marca :size="46" :texto="26" />
+            </a>
 
-            <div class="w-full sm:max-w-md mt-6 px-5 py-6 sm:px-6 sm:py-4 bg-white shadow-md overflow-hidden rounded-t-2xl sm:rounded-lg">
+            <p class="tudi-meta mt-3">{{ __('Tu déficit, en un solo número.') }}</p>
+
+            <div class="tudi-card mt-6 w-full max-w-md p-6 sm:p-7">
                 {{ $slot }}
             </div>
         </div>

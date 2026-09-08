@@ -1,3 +1,151 @@
+/*
+    Tokens del rediseño (handoff "TUDI — versión Oficial"). Van ANTES de las
+    directivas de Tailwind, tal como pide el handoff: son la fuente de verdad de
+    color, tipografía, radio y espaciado, y las clases `.tudi-*` que definen se
+    usan tal cual en las vistas.
+
+    Nota de orden: `@tailwind base` se emite después, así que sus reglas de
+    elemento (preflight) ganan a las reglas de elemento del archivo de tokens
+    (h1–h4, a, p). Las clases `.tudi-*` no se ven afectadas —tienen mayor
+    especificidad que preflight y que el plugin `forms`, que usa `:where()`—,
+    así que la maquetación usa clases, nunca los estilos de elemento sueltos.
+*/
+@import './tudi-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+    /*
+        Piezas que el rediseño necesita y que no están en el archivo de tokens.
+        Todas se construyen con variables de `tudi-tokens.css`: ni un color, un
+        radio o un tamaño inventado.
+    */
+
+    /* Enlace de texto sobre crema: lima 700, la única lima con contraste. */
+    .tudi-link {
+        color: var(--tudi-lime-700);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        font-weight: 600;
+    }
+
+    .tudi-link:hover {
+        color: var(--tudi-lime-800);
+    }
+
+    /* El campo de texto también en su versión multilínea (dictado + escritura). */
+    textarea.tudi-input {
+        min-height: 84px;
+        resize: vertical;
+        line-height: 1.45;
+    }
+
+    /* Anillo de déficit en su tamaño de escritorio (el móvil usa .tudi-ring). */
+    .tudi-ring-sm {
+        width: 176px;
+    }
+
+    /* Navegación lateral de escritorio: ítems en pastilla, activo en carbón. */
+    .tudi-side-link {
+        display: flex;
+        align-items: center;
+        gap: var(--tudi-s-3);
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: var(--tudi-r-pill);
+        font-size: 14px;
+        color: var(--tudi-ink-2);
+        text-decoration: none;
+    }
+
+    .tudi-side-link:hover {
+        background: var(--tudi-card-inset);
+        color: var(--tudi-ink);
+    }
+
+    .tudi-side-link[aria-current='page'] {
+        background: var(--tudi-ink);
+        color: var(--tudi-on-dark);
+        font-weight: 600;
+    }
+
+    /* Interruptor del cierre: "¿Cumpliste con lo sugerido?" */
+    .tudi-switch {
+        display: block;
+        position: relative;
+        flex: none;
+        width: 52px;
+        height: 30px;
+        border-radius: var(--tudi-r-pill);
+        background: var(--tudi-surface);
+        transition: background 0.15s ease;
+    }
+
+    .tudi-switch::after {
+        content: '';
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--tudi-card);
+        transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    .peer:checked ~ .tudi-switch {
+        background: var(--tudi-lime);
+    }
+
+    .peer:checked ~ .tudi-switch::after {
+        background: var(--tudi-ink);
+        transform: translateX(22px);
+    }
+
+    .peer:focus-visible ~ .tudi-switch {
+        outline: 2px solid var(--tudi-lime-700);
+        outline-offset: 2px;
+    }
+
+    /* Acordeón de comidas: el triángulo nativo del <summary> sobra. */
+    summary {
+        list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+        display: none;
+    }
+
+    /* Slider del déficit. */
+    .tudi-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 8px;
+        border-radius: var(--tudi-r-pill);
+        background: var(--tudi-surface);
+        outline: none;
+    }
+
+    .tudi-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--tudi-ink);
+        border: 3px solid var(--tudi-lime);
+        cursor: pointer;
+    }
+
+    .tudi-slider::-moz-range-thumb {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--tudi-ink);
+        border: 3px solid var(--tudi-lime);
+        cursor: pointer;
+    }
+}
