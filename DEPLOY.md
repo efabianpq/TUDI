@@ -14,8 +14,11 @@ Paso a paso concreto para publicar TUDéficit Inteligente en un hosting comparti
 
 Hostinger sirve el contenido de `public_html/` directamente; Laravel espera servir solo el contenido de `public/`. Dos formas válidas de resolverlo (elige una y sé consistente):
 
-- **Opción A (recomendada):** sube todo el proyecto a una carpeta **fuera** de `public_html` (por ejemplo `~/tudeficit-app/`) y copia/enlaza únicamente el contenido de `public/` dentro de `public_html/`, ajustando en `public_html/index.php` las rutas `require` hacia `../tudeficit-app/vendor/autoload.php` y `../tudeficit-app/bootstrap/app.php`.
-- **Opción B (más simple, aceptable en shared hosting):** sube todo el proyecto directamente a `public_html/` tal cual. Es menos prolijo (el código de la aplicación queda accesible por FTP junto al document root) pero no requiere editar `index.php`. Es la opción asumida en el resto de esta guía por simplicidad; si se usa la Opción A, ajusta las rutas de los comandos de la sección 3 en consecuencia.
+- **Opción A (recomendada, la que usa este despliegue):** sube todo el proyecto a una carpeta **fuera** de `public_html` (en este despliegue: `~/domains/TU-DOMINIO/app_laravel/`) y enlaza dentro de `public_html/` cada elemento de `public/` que deba ser accesible — **no solo `build/`**, sino cualquier archivo o carpeta nueva que se añada a `public/` (iconos, manifest, `storage`, etc.). `public_html/index.php` es un archivo **propio, fuera del repo git**, con las rutas `require` apuntando a `../app_laravel/vendor/autoload.php` y `../app_laravel/bootstrap/app.php`.
+
+  **Advertencia real, ya ocurrida:** `public_html` no se actualiza solo con `git pull` — ese comando solo actualiza `app_laravel/`. Si una tarea añade un archivo nuevo a `public/` (un icono, un manifest, `storage:link`, lo que sea) y nadie lo enlaza a mano en `public_html`, esa ruta da 404 en producción aunque el archivo exista y el `pull` haya sido perfecto — así ocurrió con `manifest.webmanifest`, `icons/` y `storage`. **Por eso el paso 7 (actualizaciones) incluye siempre el bucle de sincronización**, que es idempotente y no hace nada si ya está todo enlazado — no hay motivo para no correrlo en cada despliegue.
+
+- **Opción B (más simple, aceptable en shared hosting):** sube todo el proyecto directamente a `public_html/` tal cual. Es menos prolijo (el código de la aplicación queda accesible por FTP junto al document root) pero no requiere editar `index.php` ni sincronizar symlinks — cualquier archivo nuevo en `public/` está disponible de inmediato. Si se usa esta opción, se puede saltar el paso de sincronización del paso 7.
 
 En cualquier caso, `.env` **nunca** debe quedar dentro de una carpeta servida públicamente sin protección — con la Opción B, Laravel ya deniega el acceso directo a `.env` vía las reglas del `.htaccess` de la raíz del framework (no de `public/`), pero conviene confirmarlo (paso 6).
 
@@ -115,9 +118,31 @@ php artisan view:cache
 php artisan tudi:diagnostico                # ver sección 8
 ```
 
-No hace falta repetir `storage:link` ni `key:generate` en actualizaciones — son operaciones de una sola vez.
+No hace falta repetir `key:generate` en actualizaciones — es una operación de una sola vez.
 
 **Importante:** `config:cache` congela los valores de `.env` en un archivo compilado. Si cambias `.env` después, hay que volver a ejecutar `php artisan config:cache` (o `config:clear`) o el cambio no surtirá efecto.
+
+### Con la Opción A (proyecto fuera de `public_html`): sincronizar los enlaces de `public/`
+
+**Obligatorio en cada actualización si se usa la Opción A** (sección 2). `git pull` solo actualiza la carpeta del proyecto (`app_laravel/`); no toca `public_html`, que es donde vive realmente lo que sirve el navegador. Si una actualización añade un archivo o carpeta nueva a `public/` (un icono, un manifest, el resultado de `storage:link`, cualquier cosa) y no se enlaza a mano en `public_html`, esa ruta da 404 en producción **aunque el `pull` haya sido perfecto** — esto ya ocurrió con `manifest.webmanifest`, `icons/` y `storage` (sección 4.20).
+
+Corre esto justo después de `git pull`, desde `public_html/`:
+
+```bash
+cd ~/domains/TU-DOMINIO/public_html
+
+for item in ../app_laravel/public/*; do
+    name=$(basename "$item")
+    if [ "$name" != ".htaccess" ] && [ "$name" != "index.php" ] && [ ! -e "$name" ]; then
+        ln -s "$item" "$name"
+        echo "enlazado: $name"
+    fi
+done
+```
+
+Es **idempotente**: si ya está todo enlazado no hace nada y no imprime nada, así que no hay motivo para saltárselo en ninguna actualización. Verificar con `ls -la public_html/` que la lista de enlaces coincide con el contenido de `app_laravel/public/` (salvo `.htaccess` e `index.php`, que son propios de cada carpeta y nunca se enlazan).
+
+Si se usa la Opción B (todo el proyecto directamente en `public_html/`), este paso no aplica: cualquier archivo nuevo en `public/` está disponible de inmediato.
 
 ## 8. Diagnóstico y error 504 (Gateway Time-out)
 

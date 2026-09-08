@@ -557,6 +557,8 @@ Desde el navegador, la barra de URL y los botones del navegador ocupan pantalla 
 
 **Límite honesto:** navegando en Safari sin instalar, ninguna web puede ocultar la barra de URL. El aviso de instalación es lo que cierra esa brecha, no un truco de CSS.
 
+**Trampa de despliegue ya sufrida (2026-09-08):** en producción (Opción A de `DEPLOY.md` sección 2, proyecto fuera de `public_html`) `manifest.webmanifest` e `icons/` dieron 404 durante horas después de desplegados, porque `public_html` solo tenía enlazado `build/` a mano — nadie enlazó los archivos nuevos. El síntoma en el usuario fue justo el reportado en el hallazgo 3: el icono de la pantalla de inicio abría en modo Safari normal (con barra de URL) en vez de standalone, porque `apple-touch-icon.png` daba 404 al añadir el acceso directo. `DEPLOY.md` sección 7 ahora incluye un paso obligatorio de sincronización para que esto no se repita con el próximo archivo que se añada a `public/`.
+
 ## 4.21. Dictado por voz: dos caminos (implementado)
 
 El micrófono del plan diario no funcionaba en iPhone: pedía permiso, parecía grabar y nunca escribía nada. La Web Speech API existe en Safari de iOS pero no emite resultados de forma fiable.
