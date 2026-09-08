@@ -22,34 +22,76 @@ class RulesEngineService
 
     public const TIPO_ALERTA_ESTANCAMIENTO = 'alerta_estancamiento';
 
-    /**
-     * Umbrales de la sección 6, públicos para que TrendAnalyticsService clasifique
-     * la tendencia con los mismos números y no los duplique.
+    /*
+     * ── Valores de fábrica de los umbrales de la sección 6 ──────────────────
+     *
+     * Siguen siendo constantes públicas porque son la definición del
+     * comportamiento por defecto y el catálogo de ParametrosMaestrosService las
+     * declara como tal (`defecto`). Lo que el motor lee en tiempo de ejecución
+     * NO son estas constantes sino los métodos de abajo, que devuelven el valor
+     * vigente: el administrador puede haberlos movido desde la consola
+     * (CLAUDE.md sección 4.27).
      */
+
+    /** Por debajo de este % de pérdida semanal se sugiere reducir el objetivo. */
     public const UMBRAL_PERDIDA_LENTA_PCT = 0.5;
 
+    /** Por encima de este % de pérdida semanal se sugiere aumentarlo. */
     public const UMBRAL_PERDIDA_RAPIDA_PCT = 1.0;
 
     /**
      * Punto medio del rango 100–200 kcal que exige la sección 6. Un solo valor
-     * fijo evita introducir otra variable de configuración que el MVP no pidió.
+     * evita preguntarle al usuario una cifra exacta que el MVP no pidió.
      */
-    private const AJUSTE_KCAL_SUGERIDO = 150.0;
+    public const AJUSTE_KCAL_SUGERIDO = 150.0;
 
     /**
      * Variación semanal de peso, en kg, por debajo de la cual una semana se
      * considera "sin cambios" a efectos de detectar estancamiento.
      */
-    private const UMBRAL_ESTANCAMIENTO_KG = 0.2;
+    public const UMBRAL_ESTANCAMIENTO_KG = 0.2;
 
     /**
      * Semanas consecutivas por debajo del umbral necesarias para alertar.
      */
-    private const SEMANAS_ESTANCAMIENTO = 3;
+    public const SEMANAS_ESTANCAMIENTO = 3;
 
     public function __construct(
         private readonly NutritionAiProviderInterface $aiProvider,
+        private readonly ParametrosMaestrosService $parametros,
     ) {}
+
+    /**
+     * Los cinco umbrales de arriba son ajustables desde la consola de
+     * administración (CLAUDE.md sección 4.27); las constantes siguen siendo su
+     * valor de fábrica y el que devuelve el catálogo por defecto. Se leen por
+     * método y no por constante para que un cambio del administrador surta
+     * efecto sin desplegar.
+     */
+    public function umbralPerdidaLentaPct(): float
+    {
+        return (float) $this->parametros->valor('recomendaciones_umbral_perdida_lenta_pct');
+    }
+
+    public function umbralPerdidaRapidaPct(): float
+    {
+        return (float) $this->parametros->valor('recomendaciones_umbral_perdida_rapida_pct');
+    }
+
+    public function ajusteKcalSugerido(): float
+    {
+        return (float) $this->parametros->valor('recomendaciones_ajuste_kcal');
+    }
+
+    public function umbralEstancamientoKg(): float
+    {
+        return (float) $this->parametros->valor('recomendaciones_umbral_estancamiento_kg');
+    }
+
+    public function semanasEstancamiento(): int
+    {
+        return (int) $this->parametros->valor('recomendaciones_semanas_estancamiento');
+    }
 
     /**
      * Decide qué dirección de ajuste corresponde, si alguna, según la regla
@@ -58,11 +100,11 @@ class RulesEngineService
      */
     public function evaluarTendenciaPeso(float $porcentajePerdidaSemanal): ?string
     {
-        if ($porcentajePerdidaSemanal < self::UMBRAL_PERDIDA_LENTA_PCT) {
+        if ($porcentajePerdidaSemanal < $this->umbralPerdidaLentaPct()) {
             return 'reducir';
         }
 
-        if ($porcentajePerdidaSemanal > self::UMBRAL_PERDIDA_RAPIDA_PCT) {
+        if ($porcentajePerdidaSemanal > $this->umbralPerdidaRapidaPct()) {
             return 'aumentar';
         }
 
@@ -96,15 +138,15 @@ class RulesEngineService
         }
 
         $caloriasSugeridas = $direccion === 'reducir'
-            ? $caloriasActuales - self::AJUSTE_KCAL_SUGERIDO
-            : $caloriasActuales + self::AJUSTE_KCAL_SUGERIDO;
+            ? $caloriasActuales - $this->ajusteKcalSugerido()
+            : $caloriasActuales + $this->ajusteKcalSugerido();
 
         $mensaje = $this->aiProvider->generarTextoRecomendacion(self::TIPO_AJUSTE_CALORICO, [
             'direccion' => $direccion,
             'porcentaje_perdida_semanal' => $porcentajePerdidaSemanal,
             'calorias_actuales' => $caloriasActuales,
             'calorias_sugeridas' => $caloriasSugeridas,
-            'ajuste_kcal_sugerido' => self::AJUSTE_KCAL_SUGERIDO,
+            'ajuste_kcal_sugerido' => $this->ajusteKcalSugerido(),
         ]);
 
         return RecomendacionSistema::create([
@@ -126,21 +168,21 @@ class RulesEngineService
      */
     public function detectarEstancamiento(RegistroDiario $registroDiario, array $variacionesPesoKg): ?RecomendacionSistema
     {
-        if (count($variacionesPesoKg) < self::SEMANAS_ESTANCAMIENTO) {
+        if (count($variacionesPesoKg) < $this->semanasEstancamiento()) {
             return null;
         }
 
-        $ultimasSemanas = array_slice($variacionesPesoKg, -self::SEMANAS_ESTANCAMIENTO);
+        $ultimasSemanas = array_slice($variacionesPesoKg, -$this->semanasEstancamiento());
 
         foreach ($ultimasSemanas as $variacion) {
-            if (abs($variacion) >= self::UMBRAL_ESTANCAMIENTO_KG) {
+            if (abs($variacion) >= $this->umbralEstancamientoKg()) {
                 return null;
             }
         }
 
         $mensaje = $this->aiProvider->generarTextoRecomendacion(self::TIPO_ALERTA_ESTANCAMIENTO, [
-            'umbral_estancamiento_kg' => self::UMBRAL_ESTANCAMIENTO_KG,
-            'semanas_estancamiento' => self::SEMANAS_ESTANCAMIENTO,
+            'umbral_estancamiento_kg' => $this->umbralEstancamientoKg(),
+            'semanas_estancamiento' => $this->semanasEstancamiento(),
         ]);
 
         return RecomendacionSistema::create([

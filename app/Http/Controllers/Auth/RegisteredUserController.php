@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\CuentaService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,6 +16,10 @@ use Illuminate\View\View;
 
 class RegisteredUserController extends Controller
 {
+    public function __construct(
+        private readonly CuentaService $cuentas,
+    ) {}
+
     /**
      * Display the registration view.
      */
@@ -36,7 +41,14 @@ class RegisteredUserController extends Controller
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
-        $user = User::create([
+        /*
+         * La cuenta nace pendiente de activación (CLAUDE.md sección 4.26): se
+         * inicia sesión igualmente, pero el middleware `cuenta.activa` la lleva
+         * a la pantalla del código hasta que lo canjee. El código lo entrega el
+         * administrador por fuera de la aplicación, que es la validación manual
+         * de usuarios que pide el negocio.
+         */
+        $user = $this->cuentas->registrar([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
@@ -46,6 +58,6 @@ class RegisteredUserController extends Controller
 
         Auth::login($user);
 
-        return redirect(route('calculadora.edit', absolute: false));
+        return redirect(route('activacion.create', absolute: false));
     }
 }

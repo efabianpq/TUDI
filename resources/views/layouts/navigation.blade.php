@@ -12,11 +12,31 @@
         ['ruta' => 'planes.index', 'patron' => 'planes.*', 'texto' => __('Planes'), 'textoLargo' => __('Planes diarios')],
     ];
 
+    /*
+     * La consola de administración es un destino más de la barra lateral, pero
+     * solo para quien tiene el rol (CLAUDE.md sección 4.26). No entra en la
+     * barra inferior de móvil: esos tres destinos son el flujo diario del
+     * usuario y añadir un cuarto rompería la poda de la sección 4.15. Los
+     * administradores llegan a ella desde el menú del avatar.
+     */
+    if (Auth::user()?->esAdministrador()) {
+        $enlacesPrincipales[] = [
+            'ruta' => 'admin.inicio',
+            'patron' => 'admin.*',
+            'texto' => __('Admin'),
+            'textoLargo' => __('Administración'),
+        ];
+    }
+
     $iconos = [
         'dashboard' => 'm3 11 9-8 9 8M5 10v10h14V10',
         'calculadora.edit' => 'M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm1 4h6M9 12h.01M12 12h.01M15 12h.01M9 16h.01M12 16h.01M15 16h.01',
         'planes.index' => 'M5 4h14a1 1 0 0 1 1 1v15l-4-2-4 2-4-2-4 2V5a1 1 0 0 1 1-1Zm3 5h8M8 13h5',
+        'admin.inicio' => 'M12 3 4 6.5V12c0 4.5 3.4 7.9 8 9 4.6-1.1 8-4.5 8-9V6.5L12 3Zm0 6v4m0 3h.01',
     ];
+
+    // Los tres destinos del flujo diario, que son los que van abajo en móvil.
+    $enlacesDeMovil = array_slice($enlacesPrincipales, 0, 3);
 @endphp
 
 {{-- ── Escritorio: barra lateral de 232px ── --}}
@@ -72,7 +92,7 @@
 {{-- ── Móvil: barra inferior fija con los mismos tres destinos ── --}}
 <nav class="tudi-tabbar fixed inset-x-0 bottom-0 z-40 pb-[calc(env(safe-area-inset-bottom)+16px)] sm:hidden"
      aria-label="{{ __('Navegación principal') }}">
-    @foreach ($enlacesPrincipales as $enlace)
+    @foreach ($enlacesDeMovil as $enlace)
         @php $activo = request()->routeIs($enlace['patron']); @endphp
         <a href="{{ route($enlace['ruta']) }}" @if ($activo) aria-current="page" @endif>
             <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">

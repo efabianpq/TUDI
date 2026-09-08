@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\ActivacionController;
 use App\Http\Controllers\ActividadFisicaController;
+use App\Http\Controllers\Admin;
 use App\Http\Controllers\CierreDiarioController;
 use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\DashboardController;
@@ -16,11 +18,38 @@ Route::get('/', function () {
     return redirect()->route(auth()->check() ? 'dashboard' : 'login');
 });
 
+/*
+ * Activación de la cuenta (CLAUDE.md sección 4.26). Va fuera del grupo con
+ * `cuenta.activa` a propósito: ese middleware redirige justo aquí, y meterla
+ * dentro sería un bucle.
+ */
+Route::middleware('auth')->group(function () {
+    Route::get('/activacion', [ActivacionController::class, 'create'])->name('activacion.create');
+    Route::post('/activacion', [ActivacionController::class, 'store'])->name('activacion.store');
+});
+
 Route::get('/dashboard', [DashboardController::class, 'index'])
-    ->middleware(['auth', 'verified'])
+    ->middleware(['auth', 'verified', 'cuenta.activa'])
     ->name('dashboard');
 
-Route::middleware('auth')->group(function () {
+/*
+ * Consola de administración (sección 4.26): gestión de usuarios y parámetros
+ * maestros. Un administrador también tiene que tener su cuenta activa.
+ */
+Route::middleware(['auth', 'cuenta.activa', 'admin'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/', [Admin\UsuarioController::class, 'inicio'])->name('inicio');
+
+    Route::get('/usuarios', [Admin\UsuarioController::class, 'index'])->name('usuarios.index');
+    Route::patch('/usuarios/{usuario}', [Admin\UsuarioController::class, 'update'])->name('usuarios.update');
+    Route::post('/usuarios/{usuario}/codigo', [Admin\UsuarioController::class, 'regenerarCodigo'])->name('usuarios.codigo');
+    Route::delete('/usuarios/{usuario}', [Admin\UsuarioController::class, 'destroy'])->name('usuarios.destroy');
+
+    Route::get('/parametros', [Admin\ParametroMaestroController::class, 'edit'])->name('parametros.edit');
+    Route::put('/parametros', [Admin\ParametroMaestroController::class, 'update'])->name('parametros.update');
+    Route::post('/parametros/restablecer', [Admin\ParametroMaestroController::class, 'restablecer'])->name('parametros.restablecer');
+});
+
+Route::middleware(['auth', 'cuenta.activa'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');

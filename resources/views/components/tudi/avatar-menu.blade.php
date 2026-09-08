@@ -33,6 +33,14 @@
             {{ __('Mi cuenta') }}
         </a>
 
+        {{-- La consola no cabe en la barra inferior de móvil (sección 4.26). --}}
+        @if ($usuario?->esAdministrador())
+            <a href="{{ route('admin.inicio') }}"
+               class="flex min-h-[44px] items-center px-4 text-sm text-tudi-ink-2 no-underline hover:bg-tudi-card-inset">
+                {{ __('Administración') }}
+            </a>
+        @endif
+
         <form method="POST" action="{{ route('logout') }}">
             @csrf
             <button type="submit"

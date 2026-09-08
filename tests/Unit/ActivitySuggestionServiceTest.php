@@ -3,12 +3,13 @@
 use App\Models\User;
 use App\Services\ActivityCorrectionService;
 use App\Services\ActivitySuggestionService;
-use App\Services\NutritionCalculatorService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-// Sin RefreshDatabase: el servicio solo lee atributos del User, nunca lo
-// persiste, así que basta con `make()` y el contenedor arrancado.
-uses(TestCase::class);
+// El usuario sigue sin persistirse (`make()`), pero el servicio lee ahora los
+// parámetros maestros ajustables desde la consola (CLAUDE.md sección 4.27) y
+// esa tabla tiene que existir.
+uses(TestCase::class, RefreshDatabase::class);
 
 function usuarioPara(float $pesoKg = 80.0, float $nivelActividad = 1.5): User
 {
@@ -20,7 +21,7 @@ function usuarioPara(float $pesoKg = 80.0, float $nivelActividad = 1.5): User
 
 function servicioDeSugerencias(): ActivitySuggestionService
 {
-    return new ActivitySuggestionService(new NutritionCalculatorService);
+    return app(ActivitySuggestionService::class);
 }
 
 it('deriva el objetivo de actividad del déficit del propio usuario', function () {

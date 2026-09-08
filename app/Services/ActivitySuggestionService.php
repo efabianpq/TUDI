@@ -64,7 +64,33 @@ class ActivitySuggestionService
 
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
+        private readonly ParametrosMaestrosService $parametros,
     ) {}
+
+    /**
+     * Las cuatro cifras de arriba son ajustables desde la consola de
+     * administración (CLAUDE.md sección 4.27); las constantes públicas siguen
+     * siendo su valor de fábrica y el que devuelve el catálogo por defecto.
+     */
+    public function proporcionDelDeficit(): float
+    {
+        return (float) $this->parametros->valor('actividad_proporcion_del_deficit');
+    }
+
+    public function objetivoMinimoKcal(): float
+    {
+        return (float) $this->parametros->valor('actividad_kcal_minimas');
+    }
+
+    public function objetivoMaximoKcal(): float
+    {
+        return (float) $this->parametros->valor('actividad_kcal_maximas');
+    }
+
+    public function duracionMaximaMin(): int
+    {
+        return (int) $this->parametros->valor('actividad_duracion_maxima_min');
+    }
 
     /**
      * Plan de actividad sugerido para el día.
@@ -84,8 +110,8 @@ class ActivitySuggestionService
         $deficitDieta = max(0.0, $mantenimiento - $caloriasObjetivoDia);
 
         $objetivoActividad = min(
-            self::OBJETIVO_MAXIMO_KCAL,
-            max(self::OBJETIVO_MINIMO_KCAL, $deficitDieta * self::PROPORCION_DEL_DEFICIT),
+            $this->objetivoMaximoKcal(),
+            max($this->objetivoMinimoKcal(), $deficitDieta * $this->proporcionDelDeficit()),
         );
 
         $sugerencias = [];
@@ -110,9 +136,10 @@ class ActivitySuggestionService
     private function sugerenciaPara(string $tipo, float $met, float $pesoKg, float $objetivoKcal): array
     {
         $kcalPorMinuto = $met * 3.5 * $pesoKg / 200;
+        $duracionMaxima = $this->duracionMaximaMin();
 
-        $duracionNecesaria = $kcalPorMinuto > 0 ? (int) ceil($objetivoKcal / $kcalPorMinuto) : self::DURACION_MAXIMA_MIN;
-        $duracion = min(self::DURACION_MAXIMA_MIN, max(1, $duracionNecesaria));
+        $duracionNecesaria = $kcalPorMinuto > 0 ? (int) ceil($objetivoKcal / $kcalPorMinuto) : $duracionMaxima;
+        $duracion = min($duracionMaxima, max(1, $duracionNecesaria));
 
         return [
             'tipo' => $tipo,
@@ -120,7 +147,7 @@ class ActivitySuggestionService
             'calorias_estimadas' => round($kcalPorMinuto * $duracion, 2),
             'factor_correccion' => ActivityCorrectionService::FACTORES_POR_TIPO[$tipo]
                 ?? ActivityCorrectionService::FACTOR_POR_DEFECTO,
-            'alcanza_objetivo' => $duracionNecesaria <= self::DURACION_MAXIMA_MIN,
+            'alcanza_objetivo' => $duracionNecesaria <= $duracionMaxima,
         ];
     }
 }

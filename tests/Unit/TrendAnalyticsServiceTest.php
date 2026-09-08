@@ -57,7 +57,7 @@ it('calcula el promedio móvil de peso de 7 días ignorando los días fuera de l
         diaConPeso($usuario, $diasAtras, $peso);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // Cálculo manual: 81.5 + 81.3 + 81.2 + 81.0 + 80.9 + 80.7 + 80.6 = 567.2
     //                 567.2 / 7 = 81.028571...
@@ -85,7 +85,7 @@ it('calcula el promedio móvil de déficit calórico de 7 días', function () {
         diaConPeso($usuario, 6 - $indice, 81.0, ['deficit_diario' => $deficit, 'cerrado' => true]);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // Cálculo manual: 600 + 450 + 700 + 300 + 550 + 400 + 500 = 3500; 3500 / 7 = 500
     expect(array_sum($deficits))->toBe(3500.0)
@@ -103,7 +103,7 @@ it('el índice de consistencia refleja los días cerrados de los últimos 7', fu
     // Un día cerrado fuera de la ventana no debe inflar el índice.
     diaConPeso($usuario, 8, 80.0, ['cerrado' => true]);
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // 4 días cerrados / 7 días de ventana = 57.14%
     expect($metricas['dias_cerrados'])->toBe(4)
@@ -118,7 +118,7 @@ it('el índice de consistencia es 0 cuando hay registros pero ninguno cerrado', 
         diaConPeso($usuario, $diasAtras, 80.0, ['cerrado' => false]);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['dias_con_datos'])->toBe(7)
         ->and($metricas['dias_cerrados'])->toBe(0)
@@ -132,7 +132,7 @@ it('el índice de consistencia es 100% con los 7 días cerrados', function () {
         diaConPeso($usuario, $diasAtras, 80.0, ['cerrado' => true]);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['indice_consistencia_pct'])->toEqualWithDelta(100.0, 0.0001);
 });
@@ -145,7 +145,7 @@ it('no falla con menos de 7 días de historial: promedia lo que hay y lo marca c
     diaConPeso($usuario, 1, 79.4);
     diaConPeso($usuario, 0, 79.0);
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // Cálculo manual: (80.0 + 79.4 + 79.0) / 3 = 238.4 / 3 = 79.466666...
     expect($metricas['promedio_movil_peso_kg'])->toEqualWithDelta((80.0 + 79.4 + 79.0) / 3, 0.0001)
@@ -161,7 +161,7 @@ it('no falla con menos de 7 días de historial: promedia lo que hay y lo marca c
 it('no falla cuando el usuario no tiene ningún registro diario', function () {
     $usuario = User::factory()->create();
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['promedio_movil_peso_kg'])->toBeNull()
         ->and($metricas['promedio_movil_deficit_kcal'])->toBeNull()
@@ -179,7 +179,7 @@ it('no falla cuando hay registros diarios pero ninguno tiene el peso apuntado', 
         diaConPeso($usuario, $diasAtras, null, ['cerrado' => true]);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['promedio_movil_peso_kg'])->toBeNull()
         ->and($metricas['porcentaje_perdida_semanal'])->toBeNull()
@@ -194,7 +194,7 @@ it('el promedio ignora los días sin peso en vez de contarlos como cero', functi
     diaConPeso($usuario, 1, null);
     diaConPeso($usuario, 0, 79.0);
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // (80.0 + 79.0) / 2 = 79.5, no (80.0 + 0 + 79.0) / 3 = 53.0
     expect($metricas['promedio_movil_peso_kg'])->toEqualWithDelta(79.5, 0.0001);
@@ -213,7 +213,7 @@ it('calcula el porcentaje de pérdida semanal comparando las dos ventanas de 7 d
         diaConPeso($usuario, $diasAtras, 79.4);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     // Cálculo manual: (80 - 79.4) / 80 * 100 = 0.6 / 80 * 100 = 0.75%
     expect($metricas['porcentaje_perdida_semanal'])->toEqualWithDelta(0.75, 0.0001)
@@ -233,7 +233,7 @@ it('clasifica como pérdida lenta una bajada por debajo del 0.5% semanal', funct
         diaConPeso($usuario, $diasAtras, 79.76);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['porcentaje_perdida_semanal'])->toEqualWithDelta(0.3, 0.0001)
         ->and($metricas['tendencia'])->toBe('perdida_lenta');
@@ -251,7 +251,7 @@ it('clasifica como estable una variación dentro del ruido de la báscula', func
         diaConPeso($usuario, $diasAtras, 79.96);
     }
 
-    expect((new TrendAnalyticsService)->calcular($usuario, corteDePrueba())['tendencia'])->toBe('estable');
+    expect(app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba())['tendencia'])->toBe('estable');
 });
 
 it('clasifica como ganancia una subida de peso', function () {
@@ -265,7 +265,7 @@ it('clasifica como ganancia una subida de peso', function () {
         diaConPeso($usuario, $diasAtras, 80.8);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['porcentaje_perdida_semanal'])->toBeLessThan(0.0)
         ->and($metricas['tendencia'])->toBe('ganancia');
@@ -281,7 +281,7 @@ it('persiste una única MetricaTendencia por usuario y fecha de corte', function
         ]);
     }
 
-    $servicio = new TrendAnalyticsService;
+    $servicio = app(TrendAnalyticsService::class);
     $metrica = $servicio->calcularYPersistir($usuario, corteDePrueba());
 
     // (80.0 + 80.1 + 80.2 + 80.3 + 80.4 + 80.5 + 80.6) / 7 = 562.1 / 7 = 80.3
@@ -299,7 +299,7 @@ it('recalcular el mismo día actualiza la fila existente en vez de duplicarla', 
 
     diaConPeso($usuario, 0, 80.0);
 
-    $servicio = new TrendAnalyticsService;
+    $servicio = app(TrendAnalyticsService::class);
     $primera = $servicio->calcularYPersistir($usuario, corteDePrueba());
 
     // Cambia el peso del día y se vuelve a calcular la misma fecha de corte.
@@ -315,7 +315,7 @@ it('recalcular el mismo día actualiza la fila existente en vez de duplicarla', 
 it('persiste un snapshot vacío sin fallar cuando no hay historial', function () {
     $usuario = User::factory()->create();
 
-    $metrica = (new TrendAnalyticsService)->calcularYPersistir($usuario, corteDePrueba());
+    $metrica = app(TrendAnalyticsService::class)->calcularYPersistir($usuario, corteDePrueba());
 
     expect($metrica->promedio_movil_peso_kg)->toBeNull()
         ->and($metrica->promedio_movil_deficit_kcal)->toBeNull()
@@ -333,7 +333,7 @@ it('no mezcla los registros de otros usuarios en el promedio', function () {
         diaConPeso($otro, $diasAtras, 120.0);
     }
 
-    $metricas = (new TrendAnalyticsService)->calcular($usuario, corteDePrueba());
+    $metricas = app(TrendAnalyticsService::class)->calcular($usuario, corteDePrueba());
 
     expect($metricas['promedio_movil_peso_kg'])->toEqualWithDelta(80.0, 0.0001)
         ->and($metricas['dias_con_datos'])->toBe(7);
@@ -347,7 +347,7 @@ it('devuelve una serie histórica con un punto por día y la ventana móvil de c
         diaConPeso($usuario, $diasAtras, 80.0 + $diasAtras * 0.1);
     }
 
-    $serie = (new TrendAnalyticsService)->serieHistorica($usuario, 3, corteDePrueba());
+    $serie = app(TrendAnalyticsService::class)->serieHistorica($usuario, 3, corteDePrueba());
 
     expect($serie)->toHaveCount(3)
         ->and(array_column($serie, 'fecha'))->toBe(['2026-03-13', '2026-03-14', '2026-03-15']);
@@ -362,7 +362,7 @@ it('devuelve una serie histórica con un punto por día y la ventana móvil de c
 it('devuelve una serie histórica con huecos, no una excepción, cuando faltan días', function () {
     $usuario = User::factory()->create();
 
-    $serie = (new TrendAnalyticsService)->serieHistorica($usuario, 30, corteDePrueba());
+    $serie = app(TrendAnalyticsService::class)->serieHistorica($usuario, 30, corteDePrueba());
 
     expect($serie)->toHaveCount(30)
         ->and(array_unique(array_column($serie, 'promedio_movil_peso_kg')))->toBe([null]);
@@ -391,7 +391,7 @@ it('calcula las variaciones semanales de peso comparando promedios móviles de 7
         }
     }
 
-    $variaciones = (new TrendAnalyticsService)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
+    $variaciones = app(TrendAnalyticsService::class)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
 
     // De la más antigua a la más reciente: 79.0-79.5, 78.5-79.0, 78.0-78.5.
     expect($variaciones)->toHaveCount(3);
@@ -416,7 +416,7 @@ it('omite una variación semanal cuando falta el promedio de una de las dos sema
         diaConPeso($usuario, $diasAtras, 78.0);
     }
 
-    $variaciones = (new TrendAnalyticsService)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
+    $variaciones = app(TrendAnalyticsService::class)->variacionesSemanalesPesoKg($usuario, 3, corteDePrueba());
 
     expect($variaciones)->toHaveCount(1)
         ->and($variaciones[0])->toEqualWithDelta(-0.5, 0.001);

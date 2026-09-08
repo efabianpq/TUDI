@@ -6,6 +6,7 @@ use App\Models\MetricaTendencia;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 
 function usuarioParaComando(): User
@@ -114,4 +115,40 @@ test('CalculateTrends recalcula en sitio sin duplicar la fila del mismo día', f
     Artisan::call('app:calculate-trends');
 
     expect(MetricaTendencia::where('usuario_id', $usuario->id)->count())->toBe(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| tudi:hacer-admin (CLAUDE.md sección 4.26)
+|--------------------------------------------------------------------------
+*/
+
+test('tudi:hacer-admin promueve una cuenta y la deja activa', function () {
+    $usuario = User::factory()->pendiente()->create(['email' => 'jefe@example.com']);
+
+    $this->artisan('tudi:hacer-admin', ['email' => 'jefe@example.com'])
+        ->assertSuccessful();
+
+    $usuario->refresh();
+
+    // Se activa de paso: un administrador atrapado en la pantalla del código no
+    // podría activarse a sí mismo.
+    expect($usuario->esAdministrador())->toBeTrue()
+        ->and($usuario->estaActiva())->toBeTrue()
+        ->and($usuario->codigo_activacion)->toBeNull();
+});
+
+test('tudi:hacer-admin falla si el correo no existe', function () {
+    $this->artisan('tudi:hacer-admin', ['email' => 'nadie@example.com'])
+        ->assertFailed();
+});
+
+test('el scheduler vacía la cola de correos cada minuto', function () {
+    // Las notificaciones del alta van en cola para no bloquear el registro
+    // (sección 4.26); en hosting compartido no hay demonio, así que el vaciado
+    // cuelga del mismo cron de un minuto.
+    $eventos = collect(app(Schedule::class)->events());
+
+    expect($eventos->contains(fn ($evento) => str_contains($evento->command ?? '', 'queue:work')
+        && $evento->expression === '* * * * *'))->toBeTrue();
 });

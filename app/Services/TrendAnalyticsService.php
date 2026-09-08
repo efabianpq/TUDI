@@ -58,6 +58,16 @@ class TrendAnalyticsService
     private const UMBRAL_ESTABLE_PCT = 0.1;
 
     /**
+     * Los umbrales de pérdida lenta/rápida con los que se clasifica la
+     * tendencia son los mismos que aplica el motor de recomendaciones, y el
+     * administrador puede haberlos movido (CLAUDE.md sección 4.27): se leen del
+     * mismo sitio para que las dos pantallas nunca discrepen.
+     */
+    public function __construct(
+        private readonly ParametrosMaestrosService $parametros,
+    ) {}
+
+    /**
      * Las tres métricas de la ventana que termina en $fechaCorte, más el
      * contexto necesario para saber si son de fiar.
      *
@@ -304,11 +314,11 @@ class TrendAnalyticsService
             return 'ganancia';
         }
 
-        if ($porcentajePerdidaSemanal < RulesEngineService::UMBRAL_PERDIDA_LENTA_PCT) {
+        if ($porcentajePerdidaSemanal < (float) $this->parametros->valor('recomendaciones_umbral_perdida_lenta_pct')) {
             return 'perdida_lenta';
         }
 
-        return $porcentajePerdidaSemanal > RulesEngineService::UMBRAL_PERDIDA_RAPIDA_PCT
+        return $porcentajePerdidaSemanal > (float) $this->parametros->valor('recomendaciones_umbral_perdida_rapida_pct')
             ? 'perdida_rapida'
             : 'perdida_adecuada';
     }

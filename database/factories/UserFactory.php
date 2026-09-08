@@ -39,6 +39,16 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            /*
+             * Por defecto la cuenta nace activa: la inmensa mayoría de los
+             * tests ejercitan la aplicación, no el alta. Para el alta hay
+             * estados explícitos (`pendiente()`, `administrador()`), igual que
+             * RegistroDiarioFactory tiene `cerrado()`.
+             */
+            'rol' => User::ROL_USUARIO,
+            'estado' => User::ESTADO_ACTIVO,
+            'codigo_activacion' => null,
+            'activado_en' => now(),
             'peso_kg' => $pesoKg,
             'estatura_m' => fake()->randomFloat(2, 1.50, 2.00),
             'edad' => fake()->numberBetween(18, 65),
@@ -92,6 +102,34 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Cuenta recién registrada, esperando su código de activación
+     * (CLAUDE.md sección 4.26).
+     */
+    public function pendiente(string $codigo = 'ABCD2345'): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'estado' => User::ESTADO_PENDIENTE,
+            'codigo_activacion' => $codigo,
+            'activado_en' => null,
+        ]);
+    }
+
+    public function suspendida(): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'estado' => User::ESTADO_SUSPENDIDO,
+        ]);
+    }
+
+    public function administradora(): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'rol' => User::ROL_ADMIN,
+            'estado' => User::ESTADO_ACTIVO,
         ]);
     }
 }
