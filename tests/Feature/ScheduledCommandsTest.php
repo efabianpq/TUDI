@@ -8,6 +8,7 @@ use App\Models\RegistroDiario;
 use App\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
 
 function usuarioParaComando(): User
 {
@@ -151,4 +152,28 @@ test('el scheduler vacía la cola de correos cada minuto', function () {
 
     expect($eventos->contains(fn ($evento) => str_contains($evento->command ?? '', 'queue:work')
         && $evento->expression === '* * * * *'))->toBeTrue();
+});
+
+/*
+|--------------------------------------------------------------------------
+| tudi:diagnostico (CLAUDE.md sección 4.22)
+|--------------------------------------------------------------------------
+*/
+
+test('tudi:diagnostico corre sin tocar la red y reporta el estado', function () {
+    $this->artisan('tudi:diagnostico', ['--sin-red' => true])
+        ->expectsOutputToContain('Entorno')
+        ->expectsOutputToContain('Base de datos')
+        ->expectsOutputToContain('Sesiones y cola')
+        ->expectsOutputToContain('Almacenamiento')
+        ->assertSuccessful();
+});
+
+test('tudi:diagnostico falla cuando falta algo crítico', function () {
+    // Sin la tabla de sesiones no hay aplicación que funcione: el comando tiene
+    // que decirlo con un código de salida distinto de cero, para que sirva en
+    // un despliegue no supervisado.
+    Schema::drop('sessions');
+
+    $this->artisan('tudi:diagnostico', ['--sin-red' => true])->assertFailed();
 });
