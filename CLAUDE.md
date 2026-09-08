@@ -14,10 +14,12 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 
 
 - **Backend:** Laravel (PHP 8.x), monolito — sin API REST separada en el MVP.
-- **IA generativa:** Claude (Anthropic) **Haiku 4.5** vía la Messages API, llamada con el cliente HTTP de Laravel (`Http`), sin SDK de Composer — ver sección 4.12 para el porqué. Es la única dependencia externa de red del MVP y es opcional: sin `ANTHROPIC_API_KEY` la app funciona, solo se desactiva "Generar distribución".
+- **IA generativa:** **Gemini** (Google, `gemini-flash-latest`) vía `generateContent`, llamada con el cliente HTTP de Laravel (`Http`), sin SDK de Composer — ver sección 4.12 para el porqué. Reemplazó a Claude Haiku 4.5 el 2026-09-07. Resuelve dos cosas distintas, detrás de dos interfaces distintas: la distribución de comidas (`MealDistributionProviderInterface`, sección 4.12) y la transcripción del dictado por voz (`TranscripcionAudioProviderInterface`, sección 4.21). Es opcional: sin `GEMINI_API_KEY` la app funciona y solo se desactivan esas dos cosas, con un mensaje.
 - **Frontend:** Blade (server-rendered), **mobile-first** (sección 4.15), con la identidad y el sistema visual del rediseño TUDI (**sección 4.18**: tokens en `resources/css/tudi-tokens.css`, tipografías Instrument Sans + JetBrains Mono por Google Fonts) + Chart.js para gráficos del dashboard. Sin SPA, sin build de frontend pesado. Chart.js se carga **desde CDN** (`cdn.jsdelivr.net`) en la vista que lo necesita, empujado al stack `scripts` que declara `resources/views/layouts/app.blade.php`; no está en `package.json`. Así no hace falta `npm run build` en el hosting para que el gráfico funcione, y ninguna página que no dibuje gráficos carga la librería. **El CSS/JS del propio proyecto (Tailwind + Alpine, vía Vite/Breeze) sí requiere build**, y el hosting de Hostinger no tiene Node/npm: `public/build/` (el manifest y los assets compilados) se genera en local con `npm run build` y **se commitea al repo** (no está en `.gitignore`) — ver `DEPLOY.md` sección 1. Sin esto, cualquier vista falla en producción con `ViteManifestNotFoundException`. Hay que recordar correr `npm run build` antes de cada commit que toque `resources/css`, `resources/js` o `tailwind.config.js`.
 - **Base de datos:** MySQL 8.x / MariaDB 10.6+. Versión mínima asumida: **MySQL 5.7 / MariaDB 10.1** — ver sección 4.7, ninguna consulta usa funciones de ventana ni CTEs. El entorno de desarrollo es MySQL 8.0.30 (verificado con `php artisan db:show`) y la suite de tests corre sobre SQLite en memoria.
-- **Tareas programadas:** Laravel Task Scheduling (`schedule:run`) vía cron de Hostinger. No usar Redis ni colas externas en el MVP.
+- **Tareas programadas:** Laravel Task Scheduling (`schedule:run`) vía cron de Hostinger. No usar Redis ni colas externas en el MVP. La cola de correos del alta de cuentas (sección 4.26) usa el driver `database` y se vacía desde ese mismo cron (`queue:work --stop-when-empty`), no desde un demonio.
+- **Sesiones:** `SESSION_DRIVER=database`. **Nunca `file` en producción**: ese driver serializa las peticiones de una misma sesión y, con llamadas a la IA de segundos, dos pestañas bastan para provocar un 504 (sección 4.22).
+- **Instalable como app:** manifest, metas de Apple e iconos generados del isotipo (sección 4.20). No hay service worker ni funcionamiento sin conexión: `display: standalone` es todo lo que se busca.
 - **Almacenamiento de imágenes:** disco local vía `Storage` facade (`storage/app/public`), con `storage:link`. No hardcodear rutas — todo a través del facade para poder migrar a S3 sin tocar código.
 - **Testing:** Pest (preferido) sobre PHPUnit.
 - **Despliegue objetivo:** hosting compartido/Business de Hostinger.
@@ -39,6 +41,11 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Seguimiento periódico | `app/Services/SeguimientoService.php` |
 | Planes diarios (listado + hub del día) | `app/Http/Controllers/PlanComidaController.php` (`GET /planes`, `GET /planes/{registroDiario}`), compone `MealDistributionService` + `ActivitySuggestionService` + `DailyClosureService`, sin lógica propia |
 | Inicio (dashboard + progreso) | `app/Http/Controllers/DashboardController.php` (`GET /dashboard`), compone `DailyClosureService` + `TrendAnalyticsService` + `SeguimientoService` + `RecomendacionSistema`, sin lógica propia |
+| Ciclo de vida de la cuenta | `app/Services/CuentaService.php`, `app/Http/Controllers/ActivacionController.php`, `app/Http/Middleware/EnsureCuentaActiva.php`, `app/Notifications/*` (sección 4.26) |
+| Consola de administración | `app/Http/Controllers/Admin/UsuarioController.php` + `ParametroMaestroController.php`, `app/Http/Middleware/EnsureEsAdministrador.php` (secciones 4.26 y 4.27) |
+| Parámetros maestros | `app/Services/ParametrosMaestrosService.php`, `app/Models/ParametroMaestro.php` (sección 4.27) |
+| Dictado por voz | `app/Services/AI/TranscripcionAudioProviderInterface.php` + `GeminiTranscripcionProvider.php`, `app/Http/Controllers/TranscripcionController.php` (sección 4.21) |
+| Diagnóstico del despliegue | `app/Console/Commands/Diagnostico.php` (`tudi:diagnostico`), `app/Console/Commands/HacerAdministrador.php` (`tudi:hacer-admin`) |
 
 **Regla no negociable:** los controladores son delgados (reciben, validan con Form Requests, delegan). Toda la lógica de negocio vive en `app/Services`. Nada de lógica de negocio en modelos Eloquent ni en controladores.
 
@@ -356,7 +363,7 @@ Ambos pasos respetan la sección 6 al no aplicar nada directamente: solo persist
 **Tests:** `tests/Unit/TrendAnalyticsServiceTest.php` cubre `variacionesSemanalesPesoKg` con cuatro semanas de peso constante por bloque (verificación manual de las tres diferencias) y con una semana intermedia sin peso (la variación que la involucra se omite, no se calcula sobre `null`). `tests/Unit/DailyClosureServiceTest.php` cubre que cerrar un día con 13 días previos de historial de peso (ventana anterior a 80.5 kg, ventana actual a ~80.29 kg, pérdida ≈0.27% semanal) genera una `RecomendacionSistema` `ajuste_calorico` pendiente con la cifra sugerida esperada. `tests/Feature/RegistroPesoTest.php` cubre acceso protegido por `auth`, 403 sobre el plan de otro usuario, que un segundo pesaje el mismo día corrige el primero en vez de duplicar el registro, que `users.peso_kg` no se toca, la validación de rango, y que un día ya cerrado sigue aceptando el pesaje.
 
 
-## 4.12. Planes diarios: listado, detalle y distribución con Claude Haiku 4.5 (implementado)
+## 4.12. Planes diarios: listado, detalle y distribución con IA (implementado)
 
 **"Planes diarios" es el menú; un plan diario es un `RegistroDiario` con todo su día dentro.** El usuario entra al listado, ve el histórico completo de días que ha llevado, abre cualquiera para consultarlo o completarlo, y crea el de hoy si aún no existe.
 
@@ -380,7 +387,7 @@ Ninguna comida es obligatoria. `MealDistributionService::distribuirDia()` clasif
 
 De ahí sale el comportamiento que se pidió: si por la mañana solo se escriben desayuno y almuerzo, la cena conserva sus calorías tentativas; y si por la tarde se escribe la cena, **solo se genera la cena** — desayuno y almuerzo siguen siendo literalmente los mismos registros, y lo que ya se comió es lo que gasta presupuesto.
 
-- **"Rehacer solo el X"** (un `<button name="rehacer" value="desayuno">` dentro del mismo formulario) fuerza a regenerar una comida cuyo texto no cambió. Sin él, pulsar "Generar distribución" sin nada nuevo devuelve `MealDistributionUnavailableException::nadaQueDistribuir()` en vez de gastar una llamada al proveedor.
+- **"Rehacer solo el X"** (un `<button name="rehacer" value="desayuno">` dentro del mismo formulario) fuerza a regenerar una comida cuyo texto no cambió. Sin él, pulsar "Generar distribución" sin nada nuevo devuelve `MealDistributionUnavailableException::nadaQueDistribuir()` en vez de gastar una llamada al proveedor. **"Generar distribución" es un único botón para las tres comidas, al pie de la lista** — antes vivía dentro de cada acordeón y sugería, falsamente, que había una llamada por comida (sección 4.23).
 - **Una comida con `ComidaReal` no se regenera nunca**, ni con `rehacer`: se preserva el historial "planificado vs. ejecutado" (sección 4).
 - **Los presupuestos por comida los calcula PHP**, no el modelo (regla 7 de la sección 11): el servicio resta lo fijo y lo reservado del objetivo del día y reparte el resto; el modelo solo recibe la cifra ya hecha.
 
@@ -403,7 +410,7 @@ De ahí sale el comportamiento que se pidió: si por la mañana solo se escriben
 - **El texto del usuario se manda entre delimitadores y el prompt de sistema (`systemInstruction`) dice que es *dato*, no instrucción** — mismo criterio que con Claude.
 - **Ningún fallo produce un 500.** `MealDistributionUnavailableException` cubre: sin `GEMINI_API_KEY`, fallo/timeout del proveedor, bloqueo por `promptFeedback.blockReason` o `finishReason` en (`SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`), corte por `finishReason = MAX_TOKENS`, respuesta ininterpretable, "no reconocí ningún alimento", y "nada nuevo que distribuir". El controlador la traduce a redirect con mensaje, mismo patrón que la sección 4.2.
 - **El texto se guarda aunque la generación falle**, para no perder lo que el usuario escribió o dictó.
-- **Configuración** en `config/services.php` → `gemini` (`key`, `model`, `endpoint`, `timeout`), poblada desde `.env` (`GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_ENDPOINT`, `GEMINI_TIMEOUT`). Nunca hardcodeada ni commiteada. El bloque `anthropic` sigue existiendo (lo usa la clase de Claude sin bindear).
+- **Configuración** en `config/services.php` → `gemini` (`key`, `model`, `endpoint`, `timeout`, `connect_timeout`), poblada desde `.env`. Nunca hardcodeada ni commiteada. El bloque `anthropic` sigue existiendo (lo usa la clase de Claude sin bindear). **`timeout` es 20 s y `connect_timeout` 5 s**, y no son una preferencia de UX: mientras dura la llamada el worker de PHP-FPM está ocupado, y ese es el mecanismo del 504 bajo concurrencia (sección 4.22).
 
 ### Endpoint y dictado por voz
 
@@ -432,7 +439,7 @@ De ahí sale el comportamiento que se pidió: si por la mañana solo se escriben
 Los "parámetros nutricionales" pasaron de ser una entrada del menú desplegable a ser **"Calculadora Déficit"**, un menú principal junto a Inicio — es el primer paso del flujo y lo que dimensiona todo lo demás.
 
 - **Rutas renombradas:** `calculadora.edit` / `calculadora.update` en `/calculadora` (antes `profile.parametros.*` en `/profile/parametros`). La clase `ProfileParametersController` y la vista `profile/parametros.blade.php` **conservan su nombre**: el cambio es de cara al usuario y renombrar los archivos solo habría añadido ruido al diff. El docblock del controlador lo aclara.
-- **La vista muestra el resultado arriba del formulario**, en el panel carbón: "Tu objetivo diario — N kcal". Antes el usuario guardaba y no veía la cifra que acababa de calcular. Los nueve campos numéricos son ahora controles táctiles con recálculo en vivo — ver **sección 4.18**.
+- **La vista muestra el resultado arriba del formulario**, en el panel carbón: "Tu objetivo diario — N kcal". Antes el usuario guardaba y no veía la cifra que acababa de calcular. Los controles son táctiles y recalculan en vivo (sección 4.18), y desde la **sección 4.25** la pantalla pregunta "¿qué tan activo eres?" y "tu objetivo" con su explicación, en vez de pedir factores de macros: proteína y grasa se derivan del objetivo y viven en "Ajustes avanzados".
 - **El objetivo calórico se ve en toda la plataforma**, junto al nombre del usuario en la barra de navegación (`layouts/navigation.blade.php` lee `Auth::user()->calorias_objetivo`, que es el objetivo vigente de la sección 4.10). Si todavía es `null`, en su lugar aparece un aviso ámbar "Calcula tu objetivo" que enlaza a la calculadora.
 
 **Tests:** `tests/Feature/PlanDelDiaTest.php` cubre que la cifra aparece en Inicio, en el listado de planes y en el detalle de un plan. `tests/Feature/ProfileParametersTest.php` se ajustó a la URL nueva.
@@ -440,7 +447,7 @@ Los "parámetros nutricionales" pasaron de ser una entrada del menú desplegable
 ## 4.15. Mobile-first y navegación (implementado)
 
 - **`layouts/navigation.blade.php`** tiene dos navegaciones excluyentes: una **barra lateral de 232px** (`bg-tudi-surface`, ítems en pastilla, activo en carbón, tarjeta de usuario con nombre y objetivo diario al pie, más "Cerrar sesión") visible solo de `sm:` hacia arriba, y una **barra inferior fija estilo app** (`.tudi-tabbar`, tres destinos, activo marcado con `aria-current="page"`) por debajo de `sm`. No hay menú hamburguesa ni barra superior.
-- **Tres destinos, no cinco:** Inicio, Calculadora déficit y Planes diarios. "Mi progreso" se fusionó con Inicio (sección 4.17) y "Registrar peso" pasó a ser un campo del plan diario (sección 4.11); antes de eso ya habían salido del menú "Ingredientes", "Actividad física" y "Cierre del día", que son secciones del plan diario. El mockup del rediseño dibuja un cuarto ítem ("Mis ingredientes") en la barra lateral: **no se añadió a propósito**, porque el reporte estructurado de ingredientes dejó de ser el camino del usuario (sección 4.1) y reintroducirlo contradiría esta poda.
+- **Tres destinos, no cinco:** Inicio, Calculadora déficit y Planes diarios. (Los administradores ven un cuarto ítem, "Administración", **solo en la barra lateral y en el menú del avatar**; la barra inferior de móvil sigue teniendo tres — sección 4.26.) "Mi progreso" se fusionó con Inicio (sección 4.17) y "Registrar peso" pasó a ser un campo del plan diario (sección 4.11); antes de eso ya habían salido del menú "Ingredientes", "Actividad física" y "Cierre del día", que son secciones del plan diario. El mockup del rediseño dibuja un cuarto ítem ("Mis ingredientes") en la barra lateral: **no se añadió a propósito**, porque el reporte estructurado de ingredientes dejó de ser el camino del usuario (sección 4.1) y reintroducirlo contradiría esta poda.
 - **`layouts/app.blade.php`**: `viewport-fit=cover` + `pb-[calc(env(safe-area-inset-bottom)+16px)]` en la barra inferior para respetar el *safe area* de iOS, `theme-color` carbón, y `pb-28 sm:pb-12` en `<main>` para que el contenido no quede debajo de la barra. El `<main>` centra el contenido en `max-w-6xl` y es quien pone el padding: las vistas ya no traen su propio contenedor.
 - **Componentes compartidos**: `x-text-input` es `.tudi-input` (48px de alto, 16px de tipografía — por debajo de 16px Safari hace zoom automático al enfocar); `x-primary-button`/`x-secondary-button` son `.tudi-btn` (48px, el mínimo táctil del sistema). Al ser componentes, esto arregla todos los formularios de una vez.
 - **Objetivos táctiles**: todo control interactivo llega a 44px como mínimo (botones de dictado, avatar, ítems de navegación, interruptores del cierre).
@@ -466,7 +473,7 @@ Decisiones:
 - **Las cifras se suman en PHP** a partir de los ingredientes que estima el modelo, nunca de un total que devuelva él (regla 7 de la sección 11). La persistencia va por `ComidaRealService::registrar()`, que es quien redistribuye el presupuesto pendiente del día y recalcula `calorias_consumidas` (sección 4.3).
 - **Nunca sobrescribe lo ya registrado.** Una comida con `ComidaReal` —o sin `PlanComida`— se ignora; el camino detallado con macros exactos e imagen sigue siendo `ComidaRealController` ("Registrar con detalle").
 - **Cerrar sin decir nada sigue siendo válido:** las comidas sin registrar simplemente no suman calorías consumidas.
-- **`CierreDiarioRequest`** valida `feedback.{comida}.cumplio` (boolean nullable) y `feedback.{comida}.texto` (string nullable, `max:1000`, el mismo tope que `comidas_reales.notas`).
+- **`CierreDiarioRequest`** valida `feedback.{comida}.cumplio` (boolean nullable), `feedback.{comida}.texto` (string nullable, `max:1000`, el mismo tope que `comidas_reales.notas`) y, desde la sección 4.23, `feedback.{comida}.imagen` (`image`, `max:4096`): **este es ahora el único sitio donde se adjunta la foto de evidencia**, porque el botón "Registrar" de cada comida —que preguntaba lo mismo— desapareció. Una imagen sola no crea una `ComidaReal`: hace falta el interruptor o el texto.
 - **La casilla es hoy un interruptor** y el texto solo se despliega cuando dice que no (sección 4.18); los nombres de los campos no cambiaron.
 
 **Tests:** `tests/Unit/CierreFeedbackServiceTest.php` cubre la casilla sin llamada al proveedor, el texto interpretado con los macros sumados en PHP, la consolidación de varias comidas en una sola llamada, que el texto manda sobre la casilla, que se ignoran las comidas ya registradas o sin plan, y que un fallo del proveedor no deja nada escrito. `tests/Feature/CierreDiarioTest.php` cubre el formulario y los cuatro caminos vía HTTP.
@@ -528,6 +535,142 @@ Ataca las tres quejas que motivaron el encargo: demasiado texto explicativo, reg
 - **Recordatorio de despliegue:** cualquier cambio en `resources/css`, `resources/js` o `tailwind.config.js` obliga a `npm run build` y a commitear `public/build/` (sección 2 y `DEPLOY.md`). Las clases nuevas de una vista solo existen en el CSS si se compiló después de escribirla.
 
 **Tests:** `tests/Feature/InterfazTudiTest.php` cubre lo que el rediseño promete y no se ve en el texto de las pantallas: `aria-current` en la navegación, el anillo con su `--pct` calculado y la desaparición de la tabla de cuatro cifras, que el acordeón deja exactamente una comida abierta y cuál, la ayuda dentro del `placeholder` (y fuera de la pantalla), el interruptor del cierre, y que los controles táctiles de la calculadora mandan valores válidos y muestran el objetivo vigente arriba. El resto de la suite siguió pasando sin tocar aserciones, salvo las etiquetas renombradas en `DashboardTest` y `PlanDelDiaTest`.
+
+## 4.19. Overlay de "estamos procesando" (implementado)
+
+Las acciones que dependen del proveedor de IA ("Generar distribución", "Rehacer", "Cerrar mi día") tardan segundos y no daban ninguna señal: el usuario volvía a pulsar y gastaba otra llamada.
+
+- **`x-tudi.cargando`** vive en `layouts/app.blade.php`, así que hay una sola instancia por página. Muestra el isotipo girando (`.tudi-spinner`, el mismo anillo de la marca, no un spinner genérico), un título y **pistas que rotan cada 3,5 s** para que una espera larga no parezca una pantalla colgada.
+- **Cualquier formulario lo levanta declarando `data-cargando="Mensaje"`** (y opcionalmente `data-cargando-pistas="a|b|c"`); también lo puede declarar un botón concreto, que gana sobre el del formulario — así "Rehacer" dice "Rehaciendo el desayuno…" dentro del mismo formulario que "Generar distribución".
+- **Los botones de envío se bloquean en el siguiente tick**, no dentro del propio evento `submit`: deshabilitarlos ahí puede hacer que el navegador no incluya el `name`/`value` del botón pulsado, y "Rehacer" lo necesita.
+- **`pageshow` con `persisted`** baja el overlay al volver con el botón "atrás", que restaura la página del bfcache con el overlay puesto.
+- **`resources/js/tudi/cargando.js`**, importado desde `app.js`. Es idempotente y no falla si la página no trae el nodo.
+
+## 4.20. Shell instalable: la app se ve como app (implementado)
+
+Desde el navegador, la barra de URL y los botones del navegador ocupan pantalla y hacen que TUDI se perciba como una web. Y no de forma uniforme: el navegador móvil recoge su cromática al hacer scroll, así que una pantalla larga (Planes) se siente como app y una corta no.
+
+- **`public/manifest.webmanifest`** (`display: standalone`, `start_url: /dashboard`, scope `/`, fondo crema y tema carbón) más las metas de Apple (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title`) en **los dos layouts**, `app` y `guest`: si se instala desde el login, la sesión sigue dentro de la app.
+- **Iconos generados del isotipo** (`public/icons/`): 192, 512, maskable 512 y `apple-touch-icon` de 180, más un favicon de 32 con fondo transparente. Se generaron con GD dibujando a 4× y reduciendo, porque `imagefilledarc` no antialiasa; el ángulo del corte es el mismo 252° del componente `x-tudi.isotipo`.
+- **`min-h-[100dvh]`** (no `100vh`) en el shell de los dos layouts: `dvh` descuenta la cromática real del navegador, así que el alto útil es idéntico en todas las pantallas.
+- **`x-tudi.instalar`**: aviso discreto, descartable y solo en móvil, que ofrece el instalador nativo en Android/Chrome (`beforeinstallprompt`) y explica el gesto en iOS ("Compartir → Añadir a pantalla de inicio"). Se oculta solo si la app ya corre en `display-mode: standalone`, si el usuario lo descarta (`localStorage`) o al instalarse. En Chrome, si el navegador nunca emite el evento, el aviso no aparece: mejor eso que ofrecer un botón que no hace nada.
+
+**Límite honesto:** navegando en Safari sin instalar, ninguna web puede ocultar la barra de URL. El aviso de instalación es lo que cierra esa brecha, no un truco de CSS.
+
+## 4.21. Dictado por voz: dos caminos (implementado)
+
+El micrófono del plan diario no funcionaba en iPhone: pedía permiso, parecía grabar y nunca escribía nada. La Web Speech API existe en Safari de iOS pero no emite resultados de forma fiable.
+
+**Camino 1 — Web Speech API del navegador** (preferente): el audio no sale del dispositivo y no cuesta ninguna llamada al proveedor. Ahora con `interimResults` y `continuous`, así que lo reconocido se ve en vivo mientras se habla. **En iOS se salta directamente al camino 2**, y un error de permiso/servicio también cae a él.
+
+**Camino 2 — grabar y transcribir en el servidor:** `MediaRecorder` graba (webm/opus en Chrome y Firefox, mp4/aac en Safari) y `POST /transcribir` devuelve el texto.
+
+- **`TranscripcionAudioProviderInterface`** (`app/Services/AI/`) es un contrato **aparte** de `MealDistributionProviderInterface`: son problemas distintos (audio → texto frente a texto → macros) y podrían resolverse con proveedores distintos. Binding en `AppServiceProvider`.
+- **`GeminiTranscripcionProvider`** reutiliza el mismo `generateContent` y la misma configuración `services.gemini`, pasando el audio como `inlineData` en base64 — ninguna dependencia nueva. `temperature = 0.0` y sin razonamiento: transcribir es literal, no creativo. El prompt pide **transcripción literal**, trata el audio como dato (no como instrucción) y devuelve el marcador `SIN_VOZ` cuando no hay voz, que es más fiable que esperar la cadena vacía.
+- **`TranscripcionController`** es el **único endpoint del proyecto que responde JSON**, porque lo consume `fetch` sin recargar. Un fallo del proveedor sale como **422 con mensaje legible, nunca como un 500** (regla 6 de la sección 11). Ruta bajo `auth` con `throttle:30,1`: cada llamada gasta cuota y ocupa un worker.
+- **`TranscripcionRequest`** valida el **contenido real** del archivo (`mimetypes`, no la extensión) contra los contenedores que MediaRecorder produce en la práctica, con tope de 8 MB.
+- **Popup de grabación** (`x-tudi.dictado`): micrófono con anillo latiendo, tiempo transcurrido, lo que se va reconociendo, y "Listo"/"Cancelar". Corta sola a los 60 s. Antes el único indicio era un botón parpadeando.
+- Si el navegador no puede hacer ninguna de las dos cosas, el botón sigue oculto y se escribe a mano, como antes.
+
+## 4.22. Concurrencia y el error 504 (implementado)
+
+Producción devolvía `504 Gateway Time-out`. Ese código significa una sola cosa —PHP no contestó dentro del `fastcgi_read_timeout`— y nunca dice por qué.
+
+**El mecanismo:** en hosting compartido `pm.max_children` está entre 5 y 15, y **cada petición en curso ocupa un proceso entero de PHP-FPM**, que no atiende a nadie más mientras espera. Una llamada al proveedor de IA de 30 s ocupa un worker 30 s. Con el pool pequeño, un puñado de "Generar distribución" simultáneos agota los workers y **todas** las peticiones caen en 504, incluidas las que no tocan la IA.
+
+Qué se hizo:
+
+- **`GEMINI_TIMEOUT` baja a 20 s** y aparece **`GEMINI_CONNECT_TIMEOUT` (5 s)**, aplicados en `GeminiMealDistributionProvider` y `GeminiTranscripcionProvider`. Debe quedar **por debajo** del `fastcgi_read_timeout` del servidor para que corte la aplicación —con un mensaje al usuario— y no el gateway. El `connectTimeout` evita que un DNS o un firewall de salida mal configurado consuma el timeout entero.
+- **Los correos del alta van en cola** (sección 4.26): esperar al SMTP durante el registro bloquea un worker igual que una llamada a la IA.
+- **`ParametrosMaestrosService` no tumba la aplicación** si su tabla aún no existe: cae a los valores de fábrica y lo registra (sección 4.27).
+- **`php artisan tudi:diagnostico`** (`app/Console/Commands/Diagnostico.php`) comprueba, solo leyendo y en segundos, las causas reales del síntoma: entorno y timezone, `max_execution_time` frente al timeout del proveedor, latencia y tablas de la base de datos, migraciones pendientes, driver de sesión, sesiones caducadas, trabajos encolados y fallidos, permisos de escritura, `public/build/manifest.json`, y **si el hosting deja salir HTTPS a la API de Gemini** —lo más difícil de ver de otro modo—. Devuelve código de salida distinto de cero si algo crítico falla, para servir en un despliegue no supervisado.
+- **`DEPLOY.md` sección 8** documenta el triaje: `/up` para separar infraestructura de aplicación, el pool de PHP-FPM, y por qué **`SESSION_DRIVER` no debe ser `file`** (con el driver de archivo cada petición bloquea el archivo de sesión hasta terminar, así que dos peticiones del mismo usuario se serializan y con llamadas de segundos bastan dos pestañas para provocar un 504). El valor correcto es `database`.
+
+## 4.23. Poda del plan diario (implementado)
+
+Tres cambios sobre `planes/show.blade.php` que responden a lo mismo: la pantalla pedía dos veces lo mismo y ocupaba de más.
+
+- **Un solo "Generar distribución" para las tres comidas.** El backend **ya** hacía una única llamada al proveedor con las tres (sección 4.12), pero el botón vivía dentro de cada acordeón y sugería lo contrario, invitando a generarlas de una en una. Ahora el botón es uno solo, al pie de la lista, con la línea "Una sola consulta para desayuno, almuerzo y cena.". Desaparece cuando ya no queda ninguna comida por resolver. **"Rehacer solo el X" sigue por comida**, que es lo que sí pertenece a cada una.
+- **Actividad física agrupada** en un único `<details>`: la sugerencia y el registro ocupaban dos tarjetas y media pantalla en móvil. La cabecera resume lo hecho contra el objetivo (`340 / 528 kcal`) sin necesidad de abrirlo, y se abre sola tras guardar una actividad o si el formulario falló. La sección tiene `id="seccion-actividad"` para que el guardado sin recargar la pueda refrescar.
+- **Se retira el botón "Registrar" de cada comida**, que llevaba a `comida-real.create` y preguntaba lo mismo que el cierre ("¿Cumpliste con lo sugerido?"). **La foto de evidencia se mudó al cierre**, junto a la respuesta de cada comida: `CierreDiarioRequest` valida `feedback.{comida}.imagen` (`image`, `max:4096`, el mismo límite que tenía `ComidaRealRequest`) y `CierreFeedbackService` se la pasa a `ComidaRealService::registrar()`. **Una imagen sola no crea una `ComidaReal`**: es evidencia visual y no dice qué se comió, así que necesita el interruptor o el texto. El formulario del cierre pasa a `enctype="multipart/form-data"`.
+- **`ComidaRealController` queda sin enlazar** desde la interfaz, como las rutas de ingredientes estructurados (sección 4.1): sus rutas y tests se conservan porque siguen siendo un camino válido para corregir los macros de una comida a mano.
+
+**Tests:** `tests/Feature/InterfazTudiTest.php` cubre que hay exactamente un "Generar distribución" y tres textareas en el mismo formulario, que desaparece cuando las tres comidas están registradas, que ya no hay enlace a `comida-real.create` pero sí "Rehacer" y el campo de imagen del cierre, y que actividad es una sola sección. `tests/Feature/CierreDiarioTest.php` cubre la foto adjunta, la foto sin respuesta que no inventa nada, y el archivo que no es imagen.
+
+## 4.24. Decimales que se pueden teclear (implementado)
+
+En móvil no se podían escribir decimales en estatura, peso, proteína ni grasa. No era cosmético: **`<input type="number">` devuelve la cadena vacía mientras se está escribiendo `1.`** (el valor es inválido a medias), así que `x-model.number` de Alpine leía vacío y reescribía el campo, y el punto nunca llegaba a entrar. Además `step="0.1"` marca `1.72` como inválido y bloquea el envío.
+
+- **Todos los campos decimales pasan a `type="text" inputmode="decimal"`**: el teclado móvil sigue siendo numérico con separador decimal, pero sin validación de `step` del navegador ni valor vacío intermedio. Afecta a la calculadora (peso, estatura, proteína, grasa), al peso del día, a las kcal de actividad, a `comidas-reales/create` y a los parámetros maestros.
+- **`x-model` en vez de `x-model.number`**, con un helper `num()` en el componente Alpine que convierte aceptando también la coma.
+- **`App\Http\Requests\Concerns\NormalizaDecimales`**: trait que en `prepareForValidation()` reescribe a notación con punto los campos que se le indiquen (`"70,5"` → `"70.5"`, `"1.234,5"` → `"1234.5"`, `"1.72"` intacto). Solo cambia la notación: **no recorta ni rechaza nada**, la validación sigue siendo la única que decide si el valor sirve. Lo usan `ProfileParametersRequest`, `RegistroPesoRequest`, `ActividadFisicaRequest`, `ComidaRealRequest` y `ParametrosMaestrosRequest`.
+- La coma solo se interpreta como separador decimal cuando está presente; sin coma, el punto ya es el separador decimal y se deja tal cual.
+
+## 4.25. Calculadora orientada a objetivo (implementado)
+
+Rehecha tomando como referencia una calculadora calórica de uso general (fitnesskaizen.com/tool/calorie-calculator): pregunta lo mismo que ella y **deriva** lo que ella no pregunta.
+
+- **"¿Qué tan activo eres?"** sustituye al segmentado de cuatro pastillas: cuatro filas táctiles (Sedentario 1.2 / Ligeramente activo 1.375 / Moderadamente activo 1.55 / Muy activo 1.725, dentro del rango que valida `ProfileParametersRequest`) y **la explicación del escalón elegido debajo del control**. Es la respuesta que más mueve el resultado y la que más gente falla, así que la explicación está en pantalla y no detrás de un enlace — es la excepción explícita a la regla 8 de la sección 11.
+- **"Tu objetivo"** sustituye al par crudo "tipo de déficit + valor": Mantener (0%) / Perder despacio (−10%) / Perder (−20%) / Perder rápido (−30%), todos como `tipo_deficit = porcentaje`, también con explicación.
+- **Proteína y grasa dejan de pedirse.** Se derivan del objetivo elegido —**cuanto más agresivo el déficit, más proteína** para conservar masa magra: 0% → 1.6, −10% → 1.8, −20% → 2.0, −30% → 2.2, siempre dentro del rango 1.6–2.2 de la sección 5— y el panel de resultado explica **el rango recomendado en gramos** para ese peso y **la grasa mínima**, como hace la referencia. Siguen siendo editables en **"Ajustes avanzados"** (junto al déficit fijo) porque la sección 5 los necesita; editarlos a mano activa `macrosManuales` y deja de arrastrarlos el objetivo.
+- **Las explicaciones se renderizan desde el servidor** (la del escalón guardado) y Alpine solo las reemplaza al cambiar de opción: se leen también sin JavaScript, y son verificables desde un test de feature.
+- El déficit fijo pasa a "Ajustes avanzados" y el desplegable se abre solo si el perfil ya lo usaba o si el formulario falló. **Nada de esto cambia la sección 5**: `calculadoraDeficit()` sigue siendo un espejo en JS solo para la vista previa, y quien persiste `users.calorias_objetivo` es siempre `NutritionCalculatorService` en el servidor.
+
+## 4.26. Cuentas: alta con código de activación y consola de administración (implementado)
+
+Cualquiera puede registrarse, pero **nadie entra hasta que canjea un código que entrega el administrador por fuera de la aplicación**. Ese paso manual es la validación de usuarios que pide el negocio.
+
+### Ciclo de vida de la cuenta
+
+- **Columnas nuevas en `users`** (migración `add_administracion_a_users_table`): `rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido), `codigo_activacion` string(16) nullable, `activado_en` dateTime nullable, más un índice `(estado, rol)` para el listado. **El default de `estado` es `activo`, no `pendiente`**: la migración corre sobre una base con usuarios que ya entraban, y ponerlos en pendiente los dejaría fuera de su propia cuenta. Quien nace pendiente es cada registro nuevo, que lo fija explícitamente.
+- **`CuentaService`** es el único sitio con lógica de ciclo de vida: `registrar()`, `activarConCodigo()`, `activar()`, `suspender()`, `regenerarCodigo()`.
+  - El código son **8 caracteres de un alfabeto sin 0/O ni 1/I/L**, que se confunden al dictarlo por teléfono o leerlo de una captura.
+  - `activarConCodigo()` compara con **`hash_equals`** (el código es una credencial) y devuelve `false` sin dar pistas. Activar **quema el código**: un código canjeado no vuelve a servir.
+  - Suspender **no borra datos**; reactivar no pide código, porque la cuenta ya estuvo validada una vez.
+- **`RegisteredUserController`** delega en `CuentaService::registrar()` y redirige a `activacion.create` en vez de a la calculadora.
+- **Middleware `cuenta.activa`** (`EnsureCuentaActiva`, alias en `bootstrap/app.php`): una cuenta `pendiente` va a la pantalla del código **sin cerrarle la sesión** (acaba de registrarse, solo le falta el código); una `suspendida` **sí pierde la sesión** y vuelve al login con el motivo. Se aplica al grupo de rutas de la aplicación, **no a las de autenticación**: login, logout y la propia activación tienen que seguir siendo alcanzables.
+- **`ActivacionController`** (`GET`/`POST /activacion`), fuera del grupo con `cuenta.activa` —si no, el middleware redirigiría aquí en bucle— pero dentro de `auth`: el código se canjea contra la cuenta con sesión iniciada, nunca contra un correo suelto. `ActivacionRequest` normaliza mayúsculas, espacios y guiones antes de validar. La vista usa el layout de invitado a propósito: la navegación de la aplicación llevaría a rutas que esa cuenta todavía no puede abrir.
+
+### Correos
+
+Tres notificaciones en `app/Notifications/`, **todas `ShouldQueue`**: esperar al SMTP durante el registro bloquearía un worker de PHP-FPM (sección 4.22). El vaciado de la cola cuelga del mismo cron del scheduler (`queue:work --stop-when-empty --max-time=50 --tries=3`, cada minuto, `withoutOverlapping`).
+
+- **`CuentaPendienteDeActivacion`** (al usuario) — **no lleva el código, y no es un descuido**: si viajara en este correo, cualquiera con un email válido se activaría solo y la validación manual dejaría de existir. Dice que pida su código al administrador.
+- **`NuevoUsuarioPendiente`** (a los administradores) — este **sí** lleva el código, porque es quien lo entrega. Es una comodidad, no el único camino: si el envío falla, la activación sigue siendo posible desde la consola.
+- **`CuentaActivada`** (al usuario) — tanto si activó él con su código como si lo hizo un administrador.
+
+### Consola
+
+Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, que devuelve **403 y no un redirect**: la consola no debe ni insinuarse a quien no es administrador).
+
+- `GET /admin` (`admin.inicio`) — cifras y la cola de activación, con el código de cada pendiente a la vista y los botones para activar o regenerar.
+- `GET /admin/usuarios` — búsqueda por nombre, correo **o código**, filtro por estado, y **lo pendiente primero** (`orderByRaw` sobre `estado`). Por cada cuenta: activar/suspender, promover/degradar, regenerar código y eliminar (con confirmación, porque las FKs del dominio son cascade y se lleva todo su historial).
+- `PATCH /admin/usuarios/{usuario}`, `POST /admin/usuarios/{usuario}/codigo`, `DELETE /admin/usuarios/{usuario}`.
+- **Un administrador no puede degradarse, suspenderse ni borrarse a sí mismo.** Es la forma más fácil de quedarse sin ninguna consola accesible. La guarda está en `ActualizarUsuarioRequest::after()` (es una regla de la petición) y con `abort_if` en el controlador para las acciones sin Form Request.
+- **`php artisan tudi:hacer-admin {email}`** crea el primer administrador, que no puede salir de la propia consola. Activa la cuenta de paso: un administrador atrapado en la pantalla del código no podría activarse a sí mismo.
+- **Navegación:** "Administración" es un cuarto ítem de la barra lateral **solo para administradores**, y está en el menú del avatar. **No entra en la barra inferior de móvil**: esos tres destinos son el flujo diario del usuario y añadir un cuarto rompería la poda de la sección 4.15.
+
+**`UserFactory`:** por defecto la cuenta nace **activa** (la mayoría de los tests ejercitan la aplicación, no el alta) y hay estados explícitos `pendiente()`, `suspendida()` y `administradora()`, mismo criterio que `RegistroDiarioFactory::cerrado()`.
+
+**Tests:** `tests/Feature/ActivacionTest.php` cubre que una cuenta pendiente no entra a ninguna pantalla, que la pantalla del código no le enseña el código, la activación correcta (y que quema el código), la tolerancia a minúsculas y espacios, el código equivocado, la cuenta suspendida que pierde la sesión, y que a una activa no se la molesta. `tests/Feature/Admin/ConsolaTest.php` cubre el 403 a quien no es administrador, el enlace visible solo para ellos, activar/suspender/promover/regenerar/eliminar, las tres guardas de "no sobre uno mismo", y búsqueda y filtro. `tests/Feature/Auth/RegistrationTest.php` verifica que el correo al usuario **no** contiene su código.
+
+## 4.27. Parámetros maestros (implementado)
+
+Las cifras de criterio del dominio, ajustables desde la consola sin tocar código ni desplegar.
+
+- **Tabla `parametros_maestros`** (clave única, valor como texto, `actualizado_por`): guarda **solo lo que el administrador ha cambiado**. Una clave ausente significa "el valor de fábrica", no "sin configurar", así que la aplicación funciona con la tabla vacía.
+- **`ParametrosMaestrosService::CATALOGO`** es la **única declaración** de qué parámetros existen, de qué tipo son, entre qué límites se mueven y cómo se explican. Sus valores de fábrica **referencian las constantes públicas** de los servicios que los consumen (`RulesEngineService::AJUSTE_KCAL_SUGERIDO`, `ActivitySuggestionService::DURACION_MAXIMA_MIN`, …), no una copia: hay un solo número por parámetro en todo el proyecto. Añadir uno al catálogo lo valida y lo renderiza sin tocar el Form Request ni la vista.
+- **Nueve parámetros**, en dos grupos: los cinco umbrales del motor de recomendaciones (pérdida lenta/rápida, tamaño del ajuste, umbral y semanas de estancamiento) y los cuatro de la sugerencia de actividad (proporción del déficit, suelo, techo y duración máxima).
+- **Qué NO entra, a propósito:**
+  - **El reparto 25/40/35 entre comidas.** Cambiarlo desdibujaría los planes ya generados con el reparto anterior, y la clave de `DISTRIBUCION_COMIDAS` es además el nombre de columna del texto de ingredientes y de los campos del formulario del cierre.
+  - **Las fórmulas de la sección 5 y los rangos de macros.** Son la definición del producto, no un ajuste.
+  - **El modelo y el timeout del proveedor de IA.** Son configuración de despliegue y viven en `.env`; leerlos desde aquí obligaría a una consulta en cada petición (sección 4.22).
+- **Cableado real, no decorativo:** `RulesEngineService` y `ActivitySuggestionService` leen los valores **por método** (`umbralPerdidaLentaPct()`, `duracionMaximaMin()`, …) en vez de por constante, así que un cambio surte efecto sin desplegar. `TrendAnalyticsService` lee los dos umbrales de pérdida del mismo sitio, para que la clasificación de la tendencia y el motor de reglas nunca discrepen.
+- **Coste de lectura:** todos los valores se cachean juntos y para siempre; guardar invalida la entrada. Una petición que no consulte ningún parámetro no paga nada, y una que consulte varios paga una sola lectura. **Si la tabla no existe** (código desplegado antes que `migrate --force`), se cae a los valores de fábrica y se registra un aviso, en vez de tumbar la aplicación por un ajuste opcional.
+- **Las claves no llevan puntos** (`recomendaciones_ajuste_kcal`, no `recomendaciones.ajuste_kcal`): el validador de Laravel interpreta el punto como anidamiento y `parametros.recomendaciones.ajuste_kcal` nunca casaría con la clave plana del formulario.
+- **Rutas:** `GET/PUT /admin/parametros` y `POST /admin/parametros/restablecer`. La validación de rango vive **también** en el servicio, no solo en el Form Request, porque es el único camino de escritura y también se usa fuera de HTTP.
+
+**Tests:** `tests/Unit/ParametrosMaestrosServiceTest.php` cubre los valores de fábrica contra las constantes de origen, que guardar una clave no toca las demás, la invalidación de caché, los decimales con coma, el rango y la clave desconocida, el restablecimiento, y **que el motor de reglas aplica el umbral ajustado y no la constante**. `tests/Feature/Admin/ConsolaTest.php` cubre el flujo HTTP.
 
 ## 5. Algoritmo de cálculo nutricional (fuente de verdad)
 
@@ -597,7 +740,8 @@ calorias_actividad_ajustada = calorias_dispositivo * factor_correccion   [factor
 - Nombres de tablas/columnas en español (coinciden con el modelo de datos del documento de arquitectura) — no traducir a inglés a mitad de camino.
 - Validación de entrada siempre vía Form Requests, nunca validación inline en el controlador.
 - Usar Eloquent y sus relaciones; evitar SQL crudo salvo que sea estrictamente necesario (por ejemplo, promedios móviles si la versión de MySQL no soporta funciones de ventana — documentar la razón en el propio código si esto ocurre).
-- Fechas y cálculos de balance energético: cuidado con timezones — usar la timezone configurada en `config/app.php`, no `UTC` a pelo, para que el "día" del usuario tenga sentido.
+- Fechas y cálculos de balance energético: cuidado con timezones — usar la timezone configurada en `config/app.php`, no `UTC` a pelo, para que el "día" del usuario tenga sentido. **El valor por defecto es `America/Bogota` (GMT-5, sin horario de verano)**, la del mercado objetivo, y la suite de tests corre en esa misma zona (`phpunit.xml`) para no dejar sin cubrir la franja donde GMT-5 y UTC discrepan sobre qué día es "hoy". Sigue siendo configurable con `APP_TIMEZONE` para un despliegue en otro mercado.
+- **Campos decimales:** nunca `<input type="number">` (sección 4.24). Se usa `type="text" inputmode="decimal"` y el Form Request aplica el trait `NormalizaDecimales`.
 
 ## 8. Testing (obligatorio en cada tarea)
 
@@ -620,7 +764,10 @@ calorias_actividad_ajustada = calorias_dispositivo * factor_correccion   [factor
 - Un solo cron job: `* * * * * php /home/USER/domains/DOMINIO/public_html/artisan schedule:run >> /dev/null 2>&1`. Toda la automatización diaria (`app:run-daily-closure` 00:15, `app:calculate-trends` 00:30) está registrada en el Scheduler vía `routes/console.php` (Laravel 13 no usa `app/Console/Kernel.php`) para poder depender de este único cron — no asumir que Hostinger permite varios cron jobs de Laravel independientes.
 - **Resuelto:** `TrendAnalyticsService` calcula el promedio móvil en PHP sobre los últimos 7 `RegistroDiario`, así que no hace falta verificar la versión del plan contratado — no se usa `AVG() OVER (...)` en ningún sitio. Versión mínima asumida: MySQL 5.7 / MariaDB 10.1 (sección 4.7).
 - Variables sensibles (API key del proveedor de IA, credenciales de MySQL) solo en `.env`, nunca hardcodeadas ni commiteadas. `.env.example` documenta cada variable esperada.
-- **`GEMINI_API_KEY` es obligatoria para que funcione "Generar distribución"** (sección 4.12). Sin ella el resto de la aplicación funciona con normalidad y ese botón devuelve un mensaje pidiendo configurarla — no un 500. `GEMINI_MODEL` por defecto es `gemini-flash-latest` (alias flotante, no una versión fija — sección 4.12 explica por qué). El hosting debe permitir salida HTTPS a `generativelanguage.googleapis.com`; si el plan de Hostinger bloquea las conexiones salientes, hay que habilitarla antes de desplegar.
+- **`GEMINI_API_KEY` es obligatoria para que funcionen "Generar distribución", el cierre con feedback y el dictado por voz en iOS** (secciones 4.12 y 4.21). Sin ella el resto de la aplicación funciona con normalidad y esos botones devuelven un mensaje pidiendo configurarla — no un 500. `GEMINI_MODEL` por defecto es `gemini-flash-latest` (alias flotante, no una versión fija — sección 4.12 explica por qué). El hosting debe permitir salida HTTPS a `generativelanguage.googleapis.com`; **`tudi:diagnostico` comprueba explícitamente si esa salida está bloqueada**, que es la causa más difícil de ver de un 504 (sección 4.22).
+- **`php artisan tudi:diagnostico`** es la primera herramienta ante cualquier problema en producción: comprueba en segundos, y solo leyendo, entorno, límites de PHP, base de datos, migraciones pendientes, sesiones, cola, permisos, el manifest de Vite y la salida HTTPS. `DEPLOY.md` sección 8 documenta cómo acotar un 504 con sus resultados.
+- **`php artisan tudi:hacer-admin {email}`** crea el primer administrador tras el despliegue: la consola exige ya serlo, así que no puede salir de ella misma (sección 4.26).
+- **`MAIL_*` hay que configurarlo**: el alta de cuentas envía correo al usuario y a los administradores. Sin SMTP, esos correos no salen y la única vía de entregar el código de activación es la consola `/admin` (sección 4.26).
 - Antes de cada despliegue: `composer install --no-dev`, `php artisan migrate --force`, `php artisan config:cache`.
 - **`config('app.timezone')` es configurable vía `APP_TIMEZONE`** (antes estaba fijo en `'UTC'` en `config/app.php`, contradiciendo la sección 7). Por defecto sigue siendo `UTC` para no alterar el comportamiento de la suite de tests, pero antes de desplegar hay que fijarlo en `.env` a la timezone del mercado objetivo — de eso depende directamente dónde cae la medianoche que usa `now()->toDateString()` para decidir "el día de hoy" en todo el dominio (registro diario, cierre, tendencias).
 - **Revisión de seguridad hecha (Prompt 16):** los ocho modelos Eloquent ya declaraban `#[Fillable([...])]` (sintaxis de atributos de Laravel 13, equivalente a `protected $fillable`) desde que se crearon — no había mass assignment sin controlar. Todas las rutas bajo `auth` que reciben un ID de recurso por route-model-binding (`{registroDiario}`, `{ingrediente}`, `{planComida}`, `{recomendacion}`) ya verificaban propiedad con `abort_unless(...usuario_id === $request->user()->id, 403)`; se completó la cobertura de tests que faltaba para tres de esos casos (`ingredientes.update`, `comida-real.create` vía GET, `recomendaciones.rechazar`) — el código ya los rechazaba, solo faltaba el test. Todos los formularios Blade usan `@csrf` y no hay ninguna excepción configurada sobre `VerifyCsrfToken`. El límite de subida de imágenes lo gobierna la validación de aplicación (`ComidaRealRequest`, `max:4096` KB — sección 4.3); `DEPLOY.md` sección 5 documenta verificar que `upload_max_filesize`/`post_max_size` del hosting no queden por debajo de ese límite.
@@ -634,5 +781,7 @@ calorias_actividad_ajustada = calorias_dispositivo * factor_correccion   [factor
 5. Nunca implementes lógica que aplique automáticamente un ajuste de calorías objetivo sin pasar por `RecomendacionSistema` y confirmación del usuario (ver sección 6).
 6. **Toda llamada a un modelo de IA pasa por una interfaz en `app/Services/AI`**, nunca desde un controlador, un modelo o una vista. Y ninguna puede tumbar la aplicación: un fallo del proveedor (sin clave, timeout, respuesta rara) se traduce a una excepción de dominio y a un mensaje para el usuario, nunca a un 500 — ver sección 4.12.
 7. **Ninguna cifra que entre al balance energético del usuario la calcula un modelo de IA.** El modelo estima macros por alimento; las sumas, los objetivos y el déficit los calcula PHP con `NutritionCalculatorService` (sección 5).
-8. **El sistema visual es cerrado** (sección 4.18): no inventes colores, tamaños, radios ni tipografías fuera de `resources/css/tudi-tokens.css`. La lima es progreso y nada más; sobre crema el botón primario es carbón. Ningún párrafo de instrucciones en pantalla: la ayuda va en el `placeholder` del campo o detrás de un "¿Cómo funciona?".
+8. **El sistema visual es cerrado** (sección 4.18): no inventes colores, tamaños, radios ni tipografías fuera de `resources/css/tudi-tokens.css`. La lima es progreso y nada más; sobre crema el botón primario es carbón. Ningún párrafo de instrucciones en pantalla: la ayuda va en el `placeholder` del campo o detrás de un "¿Cómo funciona?". **Única excepción documentada:** las explicaciones del nivel de actividad y del objetivo en la calculadora (sección 4.25), porque son la respuesta que más mueve el resultado y esconderlas la falsea.
 9. **Mobile-first no es opcional** (sección 4.15): toda vista nueva se diseña primero para móvil (una columna, `text-base` en campos, objetivos táctiles de 44px) y se ensancha con `sm:`/`lg:`, no al revés.
+10. **Nada que espere a un servicio externo dentro de una petición web sin timeout acotado** (sección 4.22): cada petición en curso ocupa un proceso entero de PHP-FPM, y en hosting compartido el pool es de una decena. Si algo puede tardar, o se acota por debajo del timeout del gateway, o se manda a la cola.
+11. **Toda acción que dependa del proveedor de IA declara `data-cargando`** (sección 4.19): sin señal visible, el usuario vuelve a pulsar y gasta otra llamada.
