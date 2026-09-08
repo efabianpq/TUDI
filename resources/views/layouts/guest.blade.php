@@ -3,10 +3,20 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-        <meta name="theme-color" content="#171512">
         <meta name="csrf-token" content="{{ csrf_token() }}">
 
         <title>{{ config('app.name', 'TUDI') }}</title>
+
+        {{-- Mismo shell instalable que el área autenticada (sección 4.20): si se
+             instala desde el login, la sesión sigue dentro de la app. --}}
+        <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
+        <meta name="theme-color" content="#171512">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="tudi">
+        <link rel="apple-touch-icon" href="{{ asset('icons/apple-touch-icon.png') }}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('icons/favicon-32.png') }}">
 
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,8 +25,8 @@
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="min-h-screen bg-tudi-bg font-sans text-tudi-ink antialiased">
-        <div class="flex min-h-screen flex-col items-center justify-center px-4 py-10">
+    <body class="min-h-[100dvh] bg-tudi-bg font-sans text-tudi-ink antialiased">
+        <div class="flex min-h-[100dvh] flex-col items-center justify-center px-4 py-10">
             <a href="/" class="text-tudi-ink no-underline">
                 <x-tudi.marca :size="46" :texto="26" />
             </a>

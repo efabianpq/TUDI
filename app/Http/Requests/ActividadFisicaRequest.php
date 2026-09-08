@@ -2,17 +2,25 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\NormalizaDecimales;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ActividadFisicaRequest extends FormRequest
 {
+    use NormalizaDecimales;
+
     /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->normalizarDecimales(['calorias_dispositivo']);
     }
 
     /**

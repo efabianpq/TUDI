@@ -12,6 +12,11 @@ use Illuminate\Foundation\Http\FormRequest;
  *
  * Todo es opcional: cerrar el día sin decir nada sigue siendo válido — las
  * comidas sin registrar simplemente no suman calorías consumidas.
+ *
+ * Desde la poda de la sección 4.23 este es también el único sitio donde se
+ * adjunta la foto de evidencia de cada comida: el botón "Registrar" de cada
+ * comida desapareció (duplicaba esta misma pregunta), así que la imagen que
+ * antes se subía allí se sube aquí, junto a la respuesta de esa comida.
  */
 class CierreDiarioRequest extends FormRequest
 {
@@ -28,6 +33,8 @@ class CierreDiarioRequest extends FormRequest
             // Mismo tope que las notas de ComidaReal (sección 4.3): es el sitio
             // donde acaba guardado este texto.
             $reglas["feedback.{$tipoComida}.texto"] = ['nullable', 'string', 'max:1000'];
+            // Mismo límite que tenía ComidaRealRequest (sección 4.3).
+            $reglas["feedback.{$tipoComida}.imagen"] = ['nullable', 'image', 'max:4096'];
         }
 
         return $reglas;
@@ -40,6 +47,8 @@ class CierreDiarioRequest extends FormRequest
     {
         return [
             'feedback.*.texto.max' => 'Resume en 1000 caracteres o menos lo que comiste en cada comida.',
+            'feedback.*.imagen.image' => 'La evidencia de cada comida tiene que ser una imagen.',
+            'feedback.*.imagen.max' => 'Cada imagen de evidencia debe pesar 4 MB o menos.',
         ];
     }
 }

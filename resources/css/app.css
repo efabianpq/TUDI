@@ -118,6 +118,95 @@
         display: none;
     }
 
+    /*
+        Overlay de "estamos procesando": lo levantan las acciones que dependen
+        del proveedor de IA, que tardan segundos (CLAUDE.md sección 4.19).
+    */
+    .tudi-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: grid;
+        place-items: center;
+        padding: var(--tudi-s-4);
+        background: rgba(23, 21, 18, 0.72);
+        backdrop-filter: blur(3px);
+    }
+
+    .tudi-overlay[hidden] {
+        display: none;
+    }
+
+    /* Isotipo girando: el mismo anillo de la marca, no un spinner genérico. */
+    .tudi-spinner {
+        width: 72px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: conic-gradient(var(--tudi-lime) 0 252deg, var(--tudi-dark-4) 252deg 360deg);
+        animation: tudi-girar 1.1s linear infinite;
+    }
+
+    .tudi-spinner::after {
+        content: '';
+        width: 46%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--tudi-dark);
+    }
+
+    @keyframes tudi-girar {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .tudi-spinner {
+            animation-duration: 4s;
+        }
+    }
+
+    /* Micrófono del popup de dictado: el anillo late mientras se graba. */
+    .tudi-mic {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 88px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--tudi-dark-2);
+        color: var(--tudi-lime);
+    }
+
+    .tudi-mic::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 2px solid var(--tudi-lime);
+        animation: tudi-latido 1.6s ease-out infinite;
+    }
+
+    @keyframes tudi-latido {
+        from {
+            transform: scale(1);
+            opacity: 0.75;
+        }
+        to {
+            transform: scale(1.45);
+            opacity: 0;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .tudi-mic::before {
+            animation: none;
+            opacity: 0.6;
+        }
+    }
+
     /* Slider del déficit. */
     .tudi-slider {
         -webkit-appearance: none;

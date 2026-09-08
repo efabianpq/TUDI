@@ -169,7 +169,10 @@ class GeminiMealDistributionProvider implements MealDistributionProviderInterfac
                 'x-goog-api-key' => $clave,
                 'content-type' => 'application/json',
             ])
-                ->timeout((int) config('services.gemini.timeout', 30))
+                // El timeout acota cuánto tiempo un worker de PHP-FPM queda
+                // ocupado por esta llamada; ver la nota de config/services.php.
+                ->connectTimeout((int) config('services.gemini.connect_timeout', 5))
+                ->timeout((int) config('services.gemini.timeout', 20))
                 ->post($url, [
                     'systemInstruction' => [
                         'parts' => [['text' => $sistema]],

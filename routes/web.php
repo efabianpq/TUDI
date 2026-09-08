@@ -9,6 +9,7 @@ use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
 use App\Http\Controllers\RecomendacionSistemaController;
+use App\Http\Controllers\TranscripcionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -60,6 +61,13 @@ Route::middleware('auth')->group(function () {
 
     Route::post('/recomendaciones/{recomendacion}/confirmar', [RecomendacionSistemaController::class, 'confirmar'])->name('recomendaciones.confirmar');
     Route::post('/recomendaciones/{recomendacion}/rechazar', [RecomendacionSistemaController::class, 'rechazar'])->name('recomendaciones.rechazar');
+
+    // Dictado por voz para navegadores sin Web Speech API utilizable (Safari de
+    // iOS — CLAUDE.md sección 4.21). Limitado por usuario: cada llamada gasta
+    // cuota del proveedor y ocupa un worker mientras dura.
+    Route::post('/transcribir', TranscripcionController::class)
+        ->middleware('throttle:30,1')
+        ->name('transcribir');
 });
 
 require __DIR__.'/auth.php';

@@ -59,13 +59,19 @@ return [
     | Application Timezone
     |--------------------------------------------------------------------------
     |
-    | Here you may specify the default timezone for your application, which
-    | will be used by the PHP date and date-time functions. The timezone
-    | is set to "UTC" by default as it is suitable for most use cases.
+    | Zona horaria de la aplicación. NO es una preferencia de formato: de ella
+    | depende dónde cae la medianoche que `now()->toDateString()` usa para
+    | decidir "el día de hoy" en todo el dominio (RegistroDiario, cierre
+    | diario, promedios móviles y los comandos programados de las 00:15/00:30).
+    |
+    | El mercado objetivo es Colombia, así que el valor por defecto es
+    | America/Bogota (GMT-5, sin horario de verano) — CLAUDE.md sección 7.
+    | Sigue siendo configurable vía APP_TIMEZONE para un despliegue en otro
+    | mercado.
     |
     */
 
-    'timezone' => env('APP_TIMEZONE', 'UTC'),
+    'timezone' => env('APP_TIMEZONE', 'America/Bogota'),
 
     /*
     |--------------------------------------------------------------------------

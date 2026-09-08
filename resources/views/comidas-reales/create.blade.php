@@ -38,28 +38,28 @@
             <div class="grid gap-3 sm:grid-cols-2">
                 <div>
                     <x-input-label for="calorias_reales" :value="__('Calorías')" />
-                    <x-text-input id="calorias_reales" name="calorias_reales" type="number" step="0.01" min="0"
+                    <x-text-input id="calorias_reales" name="calorias_reales" type="text" inputmode="decimal" autocomplete="off"
                                   class="mt-1.5" :value="old('calorias_reales', round((float) $planComida->calorias_estimadas))" required />
                     <x-input-error :messages="$errors->get('calorias_reales')" class="mt-2" />
                 </div>
 
                 <div>
                     <x-input-label for="proteina_g" :value="__('Proteína (g)')" />
-                    <x-text-input id="proteina_g" name="proteina_g" type="number" step="0.01" min="0"
+                    <x-text-input id="proteina_g" name="proteina_g" type="text" inputmode="decimal" autocomplete="off"
                                   class="mt-1.5" :value="old('proteina_g', round((float) $planComida->proteina_g, 1))" required />
                     <x-input-error :messages="$errors->get('proteina_g')" class="mt-2" />
                 </div>
 
                 <div>
                     <x-input-label for="grasa_g" :value="__('Grasa (g)')" />
-                    <x-text-input id="grasa_g" name="grasa_g" type="number" step="0.01" min="0"
+                    <x-text-input id="grasa_g" name="grasa_g" type="text" inputmode="decimal" autocomplete="off"
                                   class="mt-1.5" :value="old('grasa_g', round((float) $planComida->grasa_g, 1))" required />
                     <x-input-error :messages="$errors->get('grasa_g')" class="mt-2" />
                 </div>
 
                 <div>
                     <x-input-label for="carbohidratos_g" :value="__('Carbohidratos (g)')" />
-                    <x-text-input id="carbohidratos_g" name="carbohidratos_g" type="number" step="0.01" min="0"
+                    <x-text-input id="carbohidratos_g" name="carbohidratos_g" type="text" inputmode="decimal" autocomplete="off"
                                   class="mt-1.5" :value="old('carbohidratos_g', round((float) $planComida->carbohidratos_g, 1))" required />
                     <x-input-error :messages="$errors->get('carbohidratos_g')" class="mt-2" />
                 </div>

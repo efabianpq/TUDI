@@ -65,7 +65,22 @@ return [
         'key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-flash-latest'),
         'endpoint' => env('GEMINI_ENDPOINT', 'https://generativelanguage.googleapis.com/v1beta/models'),
-        'timeout' => (int) env('GEMINI_TIMEOUT', 30),
+
+        /*
+         * El timeout NO es solo "cuánto espera el usuario": mientras dura la
+         * llamada, el proceso de PHP-FPM que la atiende está ocupado y no puede
+         * servir a nadie más. Con el pool pequeño de un hosting compartido,
+         * unas pocas llamadas simultáneas agotan los workers y el resto de las
+         * peticiones caen en 504 aunque no toquen la IA (CLAUDE.md sección
+         * 4.22). 20 s deja margen a una respuesta normal (2-6 s) y queda por
+         * debajo del `fastcgi_read_timeout` habitual de 30-60 s, de modo que
+         * quien corta es la aplicación —con un mensaje— y no el gateway.
+         */
+        'timeout' => (int) env('GEMINI_TIMEOUT', 20),
+
+        // Un DNS o un firewall de salida mal configurado no debe consumir el
+        // timeout entero antes de rendirse.
+        'connect_timeout' => (int) env('GEMINI_CONNECT_TIMEOUT', 5),
     ],
 
     'slack' => [

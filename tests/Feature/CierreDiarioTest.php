@@ -5,7 +5,9 @@ use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Cierre del día dentro del plan diario (CLAUDE.md secciones 4.5 y 4.16).
@@ -347,4 +349,70 @@ test('closing without any feedback still works and leaves the unlogged meals out
     expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(600.0);
 
     Http::assertNothingSent();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Evidencia visual en el cierre (CLAUDE.md sección 4.23)
+|--------------------------------------------------------------------------
+|
+| El botón "Registrar" de cada comida desapareció del plan diario porque
+| duplicaba la pregunta del cierre; la foto que se subía allí se sube ahora
+| junto a la respuesta de cada comida.
+*/
+
+test('la foto de evidencia se adjunta en el cierre, junto a la respuesta de esa comida', function () {
+    Storage::fake('public');
+    Http::fake();
+
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+    $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => [
+            'cumplio' => '1',
+            'imagen' => UploadedFile::fake()->image('almuerzo.jpg'),
+        ]],
+    ])->assertSessionHas('status', 'dia-cerrado');
+
+    $comidaReal = $almuerzo->fresh()->comidaReal;
+
+    expect($comidaReal->imagen_evidencia)->not->toBeNull()
+        ->and($comidaReal->imagenUrl())->toContain('/storage/comidas-reales/');
+
+    Storage::disk('public')->assertExists($comidaReal->imagen_evidencia);
+});
+
+test('una foto sin decir qué se comió no inventa ninguna ComidaReal', function () {
+    Storage::fake('public');
+    Http::fake();
+
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+    $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
+
+    // La imagen es evidencia visual: por sí sola no dice qué se comió.
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => ['imagen' => UploadedFile::fake()->image('almuerzo.jpg')]],
+    ])->assertSessionHas('status', 'dia-cerrado');
+
+    expect($almuerzo->fresh()->comidaReal)->toBeNull();
+    Http::assertNothingSent();
+});
+
+test('rechaza una evidencia que no es una imagen sin cerrar el día', function () {
+    Http::fake();
+
+    $usuario = usuarioParaCierre();
+    $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'feedback' => ['almuerzo' => [
+            'cumplio' => '1',
+            'imagen' => UploadedFile::fake()->create('recibo.pdf', 20, 'application/pdf'),
+        ]],
+    ])->assertSessionHasErrors('feedback.almuerzo.imagen');
+
+    expect($registroDiario->fresh()->cerrado)->toBeFalse();
 });

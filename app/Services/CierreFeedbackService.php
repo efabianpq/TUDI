@@ -7,6 +7,7 @@ use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Services\AI\MealDistributionProviderInterface;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,6 +22,10 @@ use Illuminate\Support\Collection;
  *    por el proveedor (`estimarConsumoReal`), que lo traduce a alimentos con
  *    sus macros; las tres comidas viajan en una sola llamada para que la
  *    estimación sea coherente entre ellas.
+ *
+ * En cualquiera de los dos se puede adjuntar la foto de evidencia de esa
+ * comida: desde la sección 4.23 este es el único sitio donde se sube, porque el
+ * botón "Registrar" de cada comida —que preguntaba lo mismo— desapareció.
  *
  * En los dos casos las cifras que entran al balance energético se suman en PHP
  * a partir de los ingredientes (regla 7 de la sección 11) y se persisten con
@@ -46,7 +51,7 @@ class CierreFeedbackService
      * (sin persistir nada) y solo después se escribe. Así un fallo de la IA no
      * deja el día a medio registrar.
      *
-     * @param  array<string, array{cumplio?: bool|string|null, texto?: string|null}>  $feedback  indexado por tipo de comida
+     * @param  array<string, array{cumplio?: bool|string|null, texto?: string|null, imagen?: UploadedFile|null}>  $feedback  indexado por tipo de comida
      * @return Collection<int, ComidaReal>
      *
      * @throws MealDistributionUnavailableException cuando el proveedor no puede interpretar lo que se comió
@@ -59,6 +64,8 @@ class CierreFeedbackService
         $aEstimar = [];
         /** @var array<string, PlanComida> $cumplidas */
         $cumplidas = [];
+        /** @var array<string, UploadedFile> $imagenes */
+        $imagenes = [];
 
         foreach ($feedback as $tipoComida => $respuesta) {
             $plan = $planes->get($tipoComida);
@@ -68,6 +75,13 @@ class CierreFeedbackService
             }
 
             $texto = isset($respuesta['texto']) ? trim((string) $respuesta['texto']) : '';
+
+            // La imagen es evidencia visual y acompaña a cualquiera de los dos
+            // caminos; por sí sola no dice qué se comió, así que no crea una
+            // ComidaReal si no hay ni texto ni "lo cumplí".
+            if (($respuesta['imagen'] ?? null) instanceof UploadedFile) {
+                $imagenes[$tipoComida] = $respuesta['imagen'];
+            }
 
             // El texto manda sobre la casilla: si contó qué comió, esa es la
             // información más fiel, aunque además marcara "lo cumplí".
@@ -88,20 +102,21 @@ class CierreFeedbackService
 
         $registradas = collect();
 
-        foreach ($cumplidas as $plan) {
+        foreach ($cumplidas as $tipoComida => $plan) {
             $registradas->push($this->comidaRealService->registrar($plan, [
                 'calorias_reales' => (float) $plan->calorias_estimadas,
                 'proteina_g' => (float) $plan->proteina_g,
                 'grasa_g' => (float) $plan->grasa_g,
                 'carbohidratos_g' => (float) $plan->carbohidratos_g,
                 'notas' => __('Cumplí con lo sugerido.'),
-            ]));
+            ], $imagenes[$tipoComida] ?? null));
         }
 
         foreach ($estimaciones as $tipoComida => $estimacion) {
             $registradas->push($this->comidaRealService->registrar(
                 $aEstimar[$tipoComida]['plan'],
                 $this->macrosDe($estimacion, $aEstimar[$tipoComida]['texto']),
+                $imagenes[$tipoComida] ?? null,
             ));
         }
 

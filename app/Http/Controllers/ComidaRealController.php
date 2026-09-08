@@ -11,6 +11,16 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
 
+/**
+ * Registro detallado de una comida real, con macros exactos e imagen.
+ *
+ * **Ya no está enlazado desde la interfaz** (CLAUDE.md sección 4.23): el botón
+ * "Registrar" de cada comida del plan diario desapareció porque duplicaba la
+ * pregunta que el cierre ya hace ("¿cumpliste con lo sugerido?"), y la foto de
+ * evidencia se subió a esa misma sección. Las rutas se conservan —igual que las
+ * de ingredientes estructurados (sección 4.1)— porque siguen siendo un camino
+ * válido y cubierto por tests para corregir los macros de una comida a mano.
+ */
 class ComidaRealController extends Controller
 {
     public function __construct(

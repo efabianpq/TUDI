@@ -19,6 +19,12 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!--
+            La suite corre en la misma zona horaria que producción (GMT-5): el
+            "día" del dominio se deriva de ella, así que probar en UTC dejaría
+            sin cubrir precisamente la franja donde las dos difieren.
+        -->
+        <env name="APP_TIMEZONE" value="America/Bogota"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>

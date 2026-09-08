@@ -3,9 +3,11 @@
 namespace App\Providers;
 
 use App\Services\AI\GeminiMealDistributionProvider;
+use App\Services\AI\GeminiTranscripcionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\NutritionAiProviderInterface;
 use App\Services\AI\RuleBasedNutritionProvider;
+use App\Services\AI\TranscripcionAudioProviderInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\ServiceProvider;
 
@@ -27,6 +29,11 @@ class AppServiceProvider extends ServiceProvider
         // arriba — cambiar de proveedor es cambiar esta línea. Gemini 2.5
         // Flash reemplazó a Claude Haiku 4.5 como proveedor vigente.
         $this->app->bind(MealDistributionProviderInterface::class, GeminiMealDistributionProvider::class);
+
+        // Dictado por voz cuando la Web Speech API del navegador no funciona
+        // (Safari de iOS — CLAUDE.md sección 4.21). Mismo criterio: cambiar de
+        // proveedor de transcripción es cambiar esta línea.
+        $this->app->bind(TranscripcionAudioProviderInterface::class, GeminiTranscripcionProvider::class);
     }
 
     /**

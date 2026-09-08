@@ -85,7 +85,9 @@ it('abre una sola comida a la vez en el plan diario', function () {
         ->assertOk()
         ->getContent();
 
-    expect(substr_count($contenido, '<details'))->toBe(3)
+    // Solo los acordeones de comida llevan data-comida; la sección de actividad
+    // física es otro <details> (sección 4.23) y no entra en la cuenta.
+    expect(substr_count($contenido, 'data-comida="'))->toBe(3)
         ->and(substr_count($contenido, 'data-comida="desayuno" open>'))->toBe(1)
         // Ninguna otra abierta: el acordeón deja ver una comida a la vez.
         ->and(substr_count($contenido, ' open>'))->toBe(1);
@@ -168,4 +170,121 @@ it('la calculadora enseña el objetivo vigente arriba, antes que los controles',
         // El panel arranca con el objetivo vigente (que una recomendación
         // confirmada puede haber movido), no con el derivado de la fórmula.
         ->and($contenido)->toContain('\u0022vigente\u0022:1950');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Poda del plan diario (CLAUDE.md sección 4.23)
+|--------------------------------------------------------------------------
+*/
+
+it('ofrece un solo "Generar distribución" para las tres comidas, no uno por comida', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $contenido = $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('Una sola consulta para desayuno, almuerzo y cena.')
+        ->getContent();
+
+    // Un único botón, y los tres textareas dentro del mismo formulario para que
+    // viajen juntos en una sola petición al proveedor.
+    expect(substr_count($contenido, 'Generar distribución'))->toBe(1)
+        ->and(substr_count($contenido, 'name="ingredientes['))->toBe(3);
+});
+
+it('esconde el botón de distribución cuando ya no queda ninguna comida por resolver', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    foreach (['desayuno', 'almuerzo', 'cena'] as $tipoComida) {
+        $plan = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+            'tipo_comida' => $tipoComida,
+        ]);
+
+        ComidaReal::factory()->for($plan, 'planComida')->create();
+    }
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertDontSee('Generar distribución');
+});
+
+it('ya no ofrece "Registrar" por comida: lo que se comió se cuenta al cerrar el día', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $plan = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'almuerzo',
+    ]);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        // El enlace a la pantalla de "Registrar con detalle" desapareció...
+        ->assertDontSee(route('comida-real.create', $plan))
+        // ...y "Rehacer" sigue estando, que es lo que sí pertenece a esta sección.
+        ->assertSee('Rehacer solo el almuerzo')
+        // La foto de evidencia se adjunta ahora en el cierre.
+        ->assertSee('feedback[almuerzo][imagen]', escape: false)
+        ->assertSee('Adjuntar foto (opcional)');
+});
+
+it('agrupa la actividad física en una sola sección desplegable', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    ActividadFisica::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo' => 'caminata',
+        'duracion_min' => 45,
+        'calorias_dispositivo' => 400,
+        'factor_correccion' => 0.85,
+        'calorias_ajustadas' => 340,
+    ]);
+
+    $contenido = $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        // La cabecera resume lo hecho contra el objetivo sin necesidad de abrirla.
+        ->assertSee('1 actividad')
+        ->assertSee('Para llegar a tu objetivo de hoy')
+        ->getContent();
+
+    // Sugerencia y registro comparten una sola tarjeta, no dos.
+    expect(substr_count($contenido, 'id="seccion-actividad"'))->toBe(1)
+        ->and(substr_count($contenido, 'Guardar actividad'))->toBe(1);
+});
+
+it('avisa al usuario mientras la IA responde', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('id="tudi-cargando"', escape: false)
+        ->assertSee('data-cargando="Generando tu distribución…"', escape: false)
+        ->assertSee('data-cargando="Cerrando tu día…"', escape: false);
+});
+
+it('acepta decimales tecleados con coma en el peso del día', function () {
+    $usuario = usuarioDelRediseno();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    // El campo es inputmode="decimal", no type="number": lo que llega es texto
+    // y puede traer coma decimal (CLAUDE.md sección 4.24).
+    $this->actingAs($usuario)
+        ->post(route('planes.peso', $registroDiario), ['peso_kg' => '80,4'])
+        ->assertRedirect();
+
+    expect((float) $registroDiario->fresh()->peso_kg)->toBe(80.4);
 });

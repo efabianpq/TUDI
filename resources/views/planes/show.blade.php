@@ -17,12 +17,19 @@
         ->sum();
 
     // Comidas planificadas pendientes de registrar: son las que el cierre
-    // pregunta si se cumplieron (CLAUDE.md sección 4.16).
+    // pregunta si se cumplieron (CLAUDE.md sección 4.16). Desde la sección 4.23
+    // el cierre es el ÚNICO sitio donde se registra lo que se comió.
     $comidasPorConfirmar = collect($comidas)->where('estado', 'planificada');
+
+    // "Generar distribución" es una sola acción para las tres comidas (sección
+    // 4.23): sobra en cuanto no queda ninguna por resolver.
+    $quedaAlgoQueGenerar = collect($comidas)->contains(fn ($comida) => $comida['estado'] !== 'registrada');
 
     // Acordeón: solo una comida abierta a la vez. Arranca en la primera que
     // todavía no se ha registrado — la que el usuario tiene que resolver.
     $comidaAbierta = collect($comidas)->firstWhere('estado', '!=', 'registrada')['tipo'] ?? null;
+
+    $caloriasActividad = $actividades->sum(fn ($registro) => (float) $registro->calorias_ajustadas);
 @endphp
 
 <x-app-layout>
@@ -118,7 +125,14 @@
                 @csrf
                 <div class="flex-1">
                     <label for="peso_kg" class="tudi-label">{{ __('Tu peso hoy (kg)') }}</label>
-                    <input id="peso_kg" name="peso_kg" type="number" inputmode="decimal" step="0.01" min="20" max="400"
+                    {{--
+                        type="text" + inputmode="decimal", no type="number"
+                        (CLAUDE.md sección 4.24): con type="number" el navegador
+                        devuelve valor vacío mientras se escribe "80." y valida
+                        `step` por su cuenta, lo que impedía teclear decimales
+                        desde el móvil. La coma decimal la normaliza el servidor.
+                    --}}
+                    <input id="peso_kg" name="peso_kg" type="text" inputmode="decimal" autocomplete="off"
                            value="{{ old('peso_kg', $registroDiario->peso_kg) }}"
                            placeholder="80,4"
                            class="tudi-input mt-1 bg-tudi-dark-2 text-tudi-on-dark"
@@ -145,6 +159,7 @@
                             <h2 class="text-lg font-semibold tracking-tudi-title">{{ __('¿Cómo funciona?') }}</h2>
                             <div class="mt-3 space-y-3 text-sm text-tudi-ink-3">
                                 <p>{{ __('Escribe o dicta lo que tienes para cada comida. Con un solo botón se reparte el día entero: cada comida recibe su parte del objetivo (25% desayuno, 40% almuerzo, 35% cena).') }}</p>
+                                <p>{{ __('Las tres comidas viajan juntas en una sola consulta, así que rellenarlas todas antes de generar cuesta lo mismo que rellenar una.') }}</p>
                                 <p>{{ __('No hace falta rellenar las tres. Lo que ya está generado no se toca, y las comidas sin texto guardan sus calorías para cuando las escribas.') }}</p>
                             </div>
                             <button type="button" x-on:click="abierto = false" class="tudi-btn tudi-btn-primary tudi-btn-block mt-5">
@@ -155,7 +170,14 @@
                 </div>
             </div>
 
-            <form method="post" action="{{ route('planes.distribucion', $registroDiario) }}" data-fetch>
+            {{--
+                Un solo formulario con las tres comidas dentro: al enviarlo
+                viajan juntas y el servidor hace UNA llamada al proveedor, no
+                una por comida (CLAUDE.md sección 4.23).
+            --}}
+            <form method="post" action="{{ route('planes.distribucion', $registroDiario) }}" data-fetch
+                  data-cargando="{{ __('Generando tu distribución…') }}"
+                  data-cargando-pistas="{{ __('Estamos repartiendo tus alimentos entre las comidas.') }}|{{ __('Se calculan las calorías y los macros de cada porción.') }}|{{ __('Suele tardar unos segundos.') }}">
                 @csrf
 
                 <div id="lista-comidas" class="space-y-2.5">
@@ -258,27 +280,34 @@
                                     </div>
                                 @endif
 
-                                @unless ($comidaReal)
-                                    <div class="mt-3 flex gap-2">
-                                        @if ($plan)
-                                            <button type="submit" name="rehacer" value="{{ $comida['tipo'] }}"
-                                                    class="tudi-btn tudi-btn-secondary flex-1 lg:flex-none">
-                                                {{ __('Rehacer') }}
-                                            </button>
-                                            <a href="{{ route('comida-real.create', $plan) }}"
-                                               class="tudi-btn tudi-btn-primary flex-1 no-underline lg:flex-none">
-                                                {{ __('Registrar') }}
-                                            </a>
-                                        @else
-                                            <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block">
-                                                {{ __('Generar distribución') }}
-                                            </button>
-                                        @endif
-                                    </div>
-                                @endunless
+                                {{--
+                                    Ya no hay botón "Registrar" por comida
+                                    (sección 4.23): lo que se comió se cuenta una
+                                    sola vez, abajo, al cerrar el día. Aquí solo
+                                    queda rehacer una comida cuyo texto no cambió.
+                                --}}
+                                @if ($plan && ! $comidaReal)
+                                    <button type="submit" name="rehacer" value="{{ $comida['tipo'] }}"
+                                            data-cargando="{{ __('Rehaciendo el') }} {{ $comida['tipo'] }}…"
+                                            class="tudi-btn tudi-btn-secondary mt-3 w-full sm:w-auto">
+                                        {{ __('Rehacer solo el') }} {{ $comida['tipo'] }}
+                                    </button>
+                                @endif
                             </div>
                         </details>
                     @endforeach
+
+                    {{-- ── Una sola acción para las tres comidas ── --}}
+                    @if ($quedaAlgoQueGenerar)
+                        <div class="pt-1.5">
+                            <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block">
+                                {{ __('Generar distribución') }}
+                            </button>
+                            <p class="mt-2 text-center text-xs text-tudi-muted">
+                                {{ __('Una sola consulta para desayuno, almuerzo y cena.') }}
+                            </p>
+                        </div>
+                    @endif
                 </div>
             </form>
         </section>
@@ -286,90 +315,119 @@
         </div>
 
         {{-- ══ Actividad física ══ --}}
-        <section class="space-y-3">
+        {{--
+            Agrupada en un solo desplegable (sección 4.23): la sugerencia y el
+            registro de lo que se hizo ocupaban dos tarjetas y media pantalla en
+            móvil. Lo importante —el objetivo y lo que ya llevas— se lee en la
+            cabecera sin abrirlo.
+        --}}
+        <section id="seccion-actividad" class="space-y-3">
             <p class="tudi-label px-1">{{ __('Actividad física') }}</p>
 
-            <div class="tudi-card p-5">
-                <div class="flex items-end justify-between gap-3">
-                    <span class="tudi-label pb-1">{{ __('Objetivo de hoy') }}</span>
-                    <span class="flex items-baseline gap-1.5">
-                        <span class="tudi-num text-[28px]">{{ $kcal($actividad['calorias_objetivo_actividad']) }}</span>
-                        <span class="tudi-meta">kcal</span>
+            {{-- Cerrada por defecto para no ocupar pantalla; se abre sola justo
+                 después de guardar una actividad o si el formulario falló. --}}
+            <details class="tudi-card"
+                     {{ session('status') === 'actividad-guardada' || $errors->any() ? 'open' : '' }}>
+                <summary class="flex min-h-[56px] cursor-pointer list-none items-center justify-between gap-3 p-4">
+                    <span class="flex items-center gap-2.5">
+                        <span @class([
+                            'h-2 w-2 flex-none rounded-full',
+                            'bg-tudi-lime' => $actividades->isNotEmpty(),
+                            'bg-tudi-input-border' => $actividades->isEmpty(),
+                        ])></span>
+                        <span class="font-semibold tracking-tudi-title">
+                            {{ $actividades->isEmpty() ? __('Sin actividad registrada') : trans_choice(':count actividad|:count actividades', $actividades->count()) }}
+                        </span>
+                        <span class="sr-only">{{ $actividades->isNotEmpty() ? __('registrada') : __('pendiente') }}</span>
                     </span>
-                </div>
+                    <span class="tudi-meta">
+                        {{ $kcal($caloriasActividad) }} / {{ $kcal($actividad['calorias_objetivo_actividad']) }} kcal
+                    </span>
+                </summary>
 
-                <ul class="mt-4 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                    @foreach ($actividad['sugerencias'] as $sugerencia)
-                        <li class="flex items-center justify-between gap-2 rounded-tudi-sm bg-tudi-card-inset px-4 py-3">
-                            <span class="text-sm capitalize">{{ $sugerencia['tipo'] }}</span>
-                            <span class="tudi-meta text-end">
-                                {{ $sugerencia['duracion_min'] }} min · {{ $kcal($sugerencia['calorias_estimadas']) }} kcal
-                            </span>
-                        </li>
-                    @endforeach
-                </ul>
-            </div>
-
-            <div class="tudi-card p-5">
-                <form method="post" action="{{ route('actividades.store', $registroDiario) }}" class="space-y-3">
-                    @csrf
-
-                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                        <div>
-                            <label for="tipo_actividad" class="tudi-label">{{ __('Actividad') }}</label>
-                            <input id="tipo_actividad" name="tipo_actividad" type="text" list="tipos-de-actividad" required
-                                   value="{{ old('tipo_actividad') }}" placeholder="{{ __('caminata') }}"
-                                   class="tudi-input mt-1">
-                            <datalist id="tipos-de-actividad">
-                                @foreach ($actividad['sugerencias'] as $sugerencia)
-                                    <option value="{{ $sugerencia['tipo'] }}"></option>
-                                @endforeach
-                            </datalist>
-                        </div>
-                        <div>
-                            <label for="duracion_min" class="tudi-label">{{ __('Minutos') }}</label>
-                            <input id="duracion_min" name="duracion_min" type="number" inputmode="numeric" min="1" required
-                                   value="{{ old('duracion_min') }}" placeholder="45" class="tudi-input mt-1">
-                        </div>
-                        <div>
-                            <label for="calorias_dispositivo" class="tudi-label">{{ __('Kcal quemadas') }}</label>
-                            <input id="calorias_dispositivo" name="calorias_dispositivo" type="number" inputmode="decimal" step="0.01" min="0" required
-                                   value="{{ old('calorias_dispositivo') }}" placeholder="320" class="tudi-input mt-1">
-                        </div>
-                        <div>
-                            <label for="pasos" class="tudi-label">{{ __('Pasos') }}</label>
-                            <input id="pasos" name="pasos" type="number" inputmode="numeric" min="0"
-                                   value="{{ old('pasos') }}" placeholder="8.000" class="tudi-input mt-1">
-                        </div>
-                        <div>
-                            <label for="fuente" class="tudi-label">{{ __('Fuente') }}</label>
-                            <select id="fuente" name="fuente" required class="tudi-input mt-1">
-                                <option value="manual" @selected(old('fuente') === 'manual')>{{ __('Manual') }}</option>
-                                <option value="dispositivo" @selected(old('fuente') === 'dispositivo')>{{ __('Dispositivo') }}</option>
-                            </select>
-                        </div>
+                <div class="space-y-4 px-4 pb-4">
+                    {{-- Sugerencias: qué hacer para llegar al objetivo de hoy. --}}
+                    <div class="tudi-card-inset rounded-tudi-sm">
+                        <p class="tudi-label">{{ __('Para llegar a tu objetivo de hoy') }}</p>
+                        <ul class="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                            @foreach ($actividad['sugerencias'] as $sugerencia)
+                                <li class="flex items-center justify-between gap-2 text-sm">
+                                    <span class="capitalize">{{ $sugerencia['tipo'] }}</span>
+                                    <span class="tudi-meta text-end">
+                                        {{ $sugerencia['duracion_min'] }} min · {{ $kcal($sugerencia['calorias_estimadas']) }} kcal
+                                    </span>
+                                </li>
+                            @endforeach
+                        </ul>
                     </div>
 
-                    <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block sm:w-auto">
-                        {{ __('Guardar actividad') }}
-                    </button>
-                </form>
+                    {{-- Lo que sí se hizo, en la misma sección. --}}
+                    @if ($actividades->isNotEmpty())
+                        <ul class="space-y-1.5">
+                            @foreach ($actividades as $registro)
+                                <li class="flex items-baseline justify-between gap-3 text-sm">
+                                    <span class="capitalize">{{ $registro->tipo }} · {{ $registro->duracion_min }} min</span>
+                                    <span class="tudi-meta">{{ $kcal($registro->calorias_ajustadas) }} kcal</span>
+                                </li>
+                            @endforeach
+                        </ul>
+                    @endif
 
-                @if ($actividades->isNotEmpty())
-                    <ul class="mt-5 space-y-1.5 border-t border-tudi-divider pt-4">
-                        @foreach ($actividades as $registro)
-                            <li class="flex items-baseline justify-between gap-3 text-sm">
-                                <span class="capitalize">{{ $registro->tipo }} · {{ $registro->duracion_min }} min</span>
-                                <span class="tudi-meta">{{ $kcal($registro->calorias_ajustadas) }} kcal</span>
-                            </li>
-                        @endforeach
-                    </ul>
-                @endif
-            </div>
+                    @unless ($registroDiario->cerrado)
+                        <form method="post" action="{{ route('actividades.store', $registroDiario) }}"
+                              class="space-y-3 border-t border-tudi-divider pt-4"
+                              data-cargando="{{ __('Guardando tu actividad…') }}">
+                            @csrf
+
+                            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                                <div>
+                                    <label for="tipo_actividad" class="tudi-label">{{ __('Actividad') }}</label>
+                                    <input id="tipo_actividad" name="tipo_actividad" type="text" list="tipos-de-actividad" required
+                                           value="{{ old('tipo_actividad') }}" placeholder="{{ __('caminata') }}"
+                                           class="tudi-input mt-1">
+                                    <datalist id="tipos-de-actividad">
+                                        @foreach ($actividad['sugerencias'] as $sugerencia)
+                                            <option value="{{ $sugerencia['tipo'] }}"></option>
+                                        @endforeach
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label for="duracion_min" class="tudi-label">{{ __('Minutos') }}</label>
+                                    <input id="duracion_min" name="duracion_min" type="number" inputmode="numeric" min="1" required
+                                           value="{{ old('duracion_min') }}" placeholder="45" class="tudi-input mt-1">
+                                </div>
+                                <div>
+                                    <label for="calorias_dispositivo" class="tudi-label">{{ __('Kcal quemadas') }}</label>
+                                    {{-- Decimal: mismo criterio que el peso (sección 4.24). --}}
+                                    <input id="calorias_dispositivo" name="calorias_dispositivo" type="text" inputmode="decimal"
+                                           autocomplete="off" required
+                                           value="{{ old('calorias_dispositivo') }}" placeholder="320" class="tudi-input mt-1">
+                                </div>
+                                <div>
+                                    <label for="pasos" class="tudi-label">{{ __('Pasos') }}</label>
+                                    <input id="pasos" name="pasos" type="number" inputmode="numeric" min="0"
+                                           value="{{ old('pasos') }}" placeholder="8000" class="tudi-input mt-1">
+                                </div>
+                                <div>
+                                    <label for="fuente" class="tudi-label">{{ __('Fuente') }}</label>
+                                    <select id="fuente" name="fuente" required class="tudi-input mt-1">
+                                        <option value="manual" @selected(old('fuente') === 'manual')>{{ __('Manual') }}</option>
+                                        <option value="dispositivo" @selected(old('fuente') === 'dispositivo')>{{ __('Dispositivo') }}</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block sm:w-auto">
+                                {{ __('Guardar actividad') }}
+                            </button>
+                        </form>
+                    @endunless
+                </div>
+            </details>
         </section>
 
         {{-- ══ Cierre del día ══ --}}
-        <section class="space-y-3">
+        <section id="seccion-cierre" class="space-y-3">
             <p class="tudi-label px-1">{{ __('Cierre del día') }}</p>
 
             <div class="tudi-card p-5">
@@ -410,7 +468,16 @@
                 </dl>
 
                 @unless ($registroDiario->cerrado)
-                    <form method="post" action="{{ route('cierre.cerrar', $registroDiario) }}" class="mt-5 border-t border-tudi-divider pt-5">
+                    {{--
+                        enctype multipart: desde la sección 4.23 la foto de
+                        evidencia de cada comida se adjunta aquí, que es donde ya
+                        se preguntaba qué se comió.
+                    --}}
+                    <form method="post" action="{{ route('cierre.cerrar', $registroDiario) }}"
+                          enctype="multipart/form-data"
+                          class="mt-5 border-t border-tudi-divider pt-5"
+                          data-cargando="{{ __('Cerrando tu día…') }}"
+                          data-cargando-pistas="{{ __('Estamos estimando lo que comiste de verdad.') }}|{{ __('Después se congelan tus cifras del día.') }}|{{ __('Suele tardar unos segundos.') }}">
                         @csrf
 
                         @if ($comidasPorConfirmar->isNotEmpty())
@@ -418,7 +485,8 @@
 
                             <div class="mt-3 space-y-2.5">
                                 @foreach ($comidasPorConfirmar as $comida)
-                                    <div class="rounded-tudi-md border border-tudi-border p-4" x-data="{ cumplio: false }">
+                                    <div class="rounded-tudi-md border border-tudi-border p-4"
+                                         x-data="{ cumplio: false, foto: '' }">
                                         <div class="flex items-center gap-3">
                                             <div class="flex-1">
                                                 <p class="font-semibold capitalize tracking-tudi-title">{{ $comida['tipo'] }}</p>
@@ -457,6 +525,18 @@
                                                 </svg>
                                             </button>
                                         </div>
+
+                                        {{-- Evidencia visual: opcional, en los dos caminos. --}}
+                                        <label class="mt-3 flex min-h-[44px] cursor-pointer items-center gap-2.5 text-[13px] text-tudi-ink-2">
+                                            <input type="file" name="feedback[{{ $comida['tipo'] }}][imagen]"
+                                                   accept="image/*" class="sr-only"
+                                                   x-on:change="foto = $event.target.files[0]?.name || ''">
+                                            <svg class="h-5 w-5 flex-none text-tudi-muted" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Zm9 9a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                                            </svg>
+                                            <span x-text="foto || '{{ __('Adjuntar foto (opcional)') }}'"
+                                                  class="truncate">{{ __('Adjuntar foto (opcional)') }}</span>
+                                        </label>
                                     </div>
                                 @endforeach
                             </div>
@@ -511,161 +591,4 @@
     </div>
 
     @endif
-
-    @push('scripts')
-        <script>
-            (function () {
-                // ── Acordeón: solo una comida abierta a la vez ──
-                // El evento `toggle` no burbujea, así que se escucha en captura.
-                document.addEventListener('toggle', function (evento) {
-                    var detalle = evento.target;
-
-                    if (! detalle.matches || ! detalle.matches('details[data-comida]') || ! detalle.open) {
-                        return;
-                    }
-
-                    document.querySelectorAll('details[data-comida]').forEach(function (otro) {
-                        if (otro !== detalle) {
-                            otro.open = false;
-                        }
-                    });
-                }, true);
-
-                // ── Dictado por voz (Web Speech API del navegador) ──
-                // Sin dependencias nuevas y sin que el audio pase por nuestro
-                // servidor. Si el navegador no la soporta, los botones quedan
-                // ocultos y el usuario escribe a mano (CLAUDE.md sección 4.12).
-                function configurarDictado(raiz) {
-                    var Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-                    if (! Reconocimiento) {
-                        return;
-                    }
-
-                    raiz.querySelectorAll('[data-boton-dictado]').forEach(function (boton) {
-                        var campo = document.getElementById(boton.dataset.botonDictado);
-
-                        if (! campo || boton.dataset.dictadoListo) {
-                            return;
-                        }
-
-                        boton.dataset.dictadoListo = '1';
-                        boton.hidden = false;
-
-                        var reconocimiento = new Reconocimiento();
-                        reconocimiento.lang = 'es-ES';
-                        reconocimiento.interimResults = false;
-                        reconocimiento.continuous = false;
-
-                        var escuchando = false;
-
-                        boton.addEventListener('click', function () {
-                            if (escuchando) {
-                                reconocimiento.stop();
-
-                                return;
-                            }
-
-                            try {
-                                reconocimiento.start();
-                            } catch (error) {
-                                return;
-                            }
-
-                            escuchando = true;
-                            boton.classList.add('text-tudi-amber-ink', 'animate-pulse');
-                        });
-
-                        reconocimiento.addEventListener('result', function (evento) {
-                            var texto = evento.results[0][0].transcript;
-                            campo.value = campo.value ? campo.value.trim() + ' ' + texto : texto;
-                            campo.dispatchEvent(new Event('input'));
-                        });
-
-                        ['end', 'error'].forEach(function (nombre) {
-                            reconocimiento.addEventListener(nombre, function () {
-                                escuchando = false;
-                                boton.classList.remove('text-tudi-amber-ink', 'animate-pulse');
-                            });
-                        });
-                    });
-                }
-
-                // ── Guardar sin recargar la página ──
-                // El formulario se manda por fetch; la respuesta del redirect
-                // trae la página ya recalculada y solo se reemplazan el panel
-                // de objetivo, la lista de comidas y los avisos. Sin JS (o si
-                // algo falla) el mismo formulario se envía de forma normal.
-                var SECCIONES = ['#tudi-avisos', '#panel-objetivo', '#lista-comidas'];
-
-                document.addEventListener('submit', function (evento) {
-                    var formulario = evento.target.closest('form[data-fetch]');
-
-                    if (! formulario || ! window.fetch || ! window.DOMParser) {
-                        return;
-                    }
-
-                    evento.preventDefault();
-
-                    var datos = new FormData(formulario);
-                    // `submitter` no existe en navegadores viejos: sin el se
-                    // perderia el valor de "Rehacer".
-                    var enviador = evento.submitter || document.activeElement;
-
-                    if (enviador && enviador.name && enviador.form === formulario) {
-                        datos.append(enviador.name, enviador.value);
-                    }
-
-                    var comidaAbierta = document.querySelector('details[data-comida][open]');
-                    comidaAbierta = comidaAbierta ? comidaAbierta.dataset.comida : null;
-
-                    document.body.setAttribute('aria-busy', 'true');
-
-                    fetch(formulario.action, {
-                        method: 'POST',
-                        body: datos,
-                        credentials: 'same-origin',
-                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'text/html' },
-                    })
-                        .then(function (respuesta) {
-                            if (! respuesta.ok) {
-                                throw new Error('respuesta no válida');
-                            }
-
-                            return respuesta.text();
-                        })
-                        .then(function (html) {
-                            var recibido = new DOMParser().parseFromString(html, 'text/html');
-
-                            SECCIONES.forEach(function (selector) {
-                                var nuevo = recibido.querySelector(selector);
-                                var actual = document.querySelector(selector);
-
-                                if (nuevo && actual) {
-                                    actual.replaceWith(nuevo);
-                                }
-                            });
-
-                            if (comidaAbierta) {
-                                document.querySelectorAll('details[data-comida]').forEach(function (detalle) {
-                                    detalle.open = detalle.dataset.comida === comidaAbierta;
-                                });
-                            }
-
-                            document.body.removeAttribute('aria-busy');
-                            configurarDictado(document);
-                        })
-                        .catch(function () {
-                            // Cualquier problema: se envía como un formulario normal.
-                            formulario.removeAttribute('data-fetch');
-                            formulario.submit();
-                        });
-                });
-
-                document.addEventListener('DOMContentLoaded', function () {
-                    configurarDictado(document);
-                });
-            })();
-        </script>
-    @endpush
 </x-app-layout>
