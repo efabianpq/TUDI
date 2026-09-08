@@ -166,7 +166,7 @@ it('la calculadora enseña el objetivo vigente arriba, antes que los controles',
         ->assertOk()
         ->getContent();
 
-    expect(strpos($contenido, 'Tu objetivo diario'))->toBeLessThan(strpos($contenido, 'Nivel de actividad'))
+    expect(strpos($contenido, 'Tu objetivo diario'))->toBeLessThan(strpos($contenido, '¿Qué tan activo eres?'))
         // El panel arranca con el objetivo vigente (que una recomendación
         // confirmada puede haber movido), no con el derivado de la fórmula.
         ->and($contenido)->toContain('\u0022vigente\u0022:1950');

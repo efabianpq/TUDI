@@ -23,6 +23,7 @@ class ProfileParametersRequest extends FormRequest
         $this->normalizarDecimales([
             'peso_kg',
             'estatura_m',
+            'nivel_actividad',
             'valor_deficit',
             'proteina_factor',
             'grasa_factor',
