@@ -47,6 +47,11 @@ Route::middleware(['auth', 'cuenta.activa', 'admin'])->prefix('admin')->name('ad
     Route::get('/parametros', [Admin\ParametroMaestroController::class, 'edit'])->name('parametros.edit');
     Route::put('/parametros', [Admin\ParametroMaestroController::class, 'update'])->name('parametros.update');
     Route::post('/parametros/restablecer', [Admin\ParametroMaestroController::class, 'restablecer'])->name('parametros.restablecer');
+
+    // Material de apoyo del usuario: video y guía en PDF (sección 5.15).
+    Route::get('/recursos', [Admin\RecursoDidacticoController::class, 'edit'])->name('recursos.edit');
+    Route::post('/recursos', [Admin\RecursoDidacticoController::class, 'update'])->name('recursos.update');
+    Route::delete('/recursos/{clave}', [Admin\RecursoDidacticoController::class, 'destroy'])->name('recursos.destroy');
 });
 
 Route::middleware(['auth', 'cuenta.activa'])->group(function () {
@@ -67,6 +72,11 @@ Route::middleware(['auth', 'cuenta.activa'])->group(function () {
     Route::get('/planes/{registroDiario}', [PlanComidaController::class, 'show'])->name('planes.show');
     Route::post('/planes/{registroDiario}/distribucion', [PlanComidaController::class, 'distribuir'])->name('planes.distribucion');
     Route::post('/planes/{registroDiario}/peso', [PlanComidaController::class, 'peso'])->name('planes.peso');
+    // Reparto de calorías entre comidas de ese día (sección 5.14) y las dos
+    // acciones destructivas del plan diario (sección 5.16).
+    Route::post('/planes/{registroDiario}/reparto', [PlanComidaController::class, 'reparto'])->name('planes.reparto');
+    Route::post('/planes/{registroDiario}/resetear', [PlanComidaController::class, 'resetear'])->name('planes.resetear');
+    Route::delete('/planes/{registroDiario}', [PlanComidaController::class, 'destroy'])->name('planes.destroy');
     Route::post('/planes/{registroDiario}/generar', [PlanComidaController::class, 'generar'])->name('planes.generar');
     Route::post('/planes/{registroDiario}/actividades', [ActividadFisicaController::class, 'store'])->name('actividades.store');
     Route::post('/planes/{registroDiario}/cierre', [CierreDiarioController::class, 'cerrar'])->name('cierre.cerrar');
@@ -74,6 +84,8 @@ Route::middleware(['auth', 'cuenta.activa'])->group(function () {
 
     Route::get('/plan/{planComida}/comida-real', [ComidaRealController::class, 'create'])->name('comida-real.create');
     Route::post('/plan/{planComida}/comida-real', [ComidaRealController::class, 'store'])->name('comida-real.store');
+    // "Cambiar mi respuesta" del cierre (sección 5.5): esta sí está enlazada.
+    Route::delete('/plan/{planComida}/comida-real', [ComidaRealController::class, 'destroy'])->name('comida-real.destroy');
 
     // Reporte estructurado de ingredientes (sección 4.1). Ya no es un menú:
     // el camino normal es el texto libre del plan diario, pero las rutas se

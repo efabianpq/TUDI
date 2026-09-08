@@ -75,4 +75,27 @@ class ComidaRealController extends Controller
 
         return Redirect::route('planes.show', $planComida->registroDiario)->with('status', 'comida-real-guardada');
     }
+
+    /**
+     * "Cambiar mi respuesta": borra lo registrado para esa comida y devuelve la
+     * pregunta del cierre (CLAUDE.md sección 5.5).
+     *
+     * Este sí está enlazado desde la interfaz, a diferencia del resto del
+     * controlador: es lo que hace que, al reabrir un día, el cierre vuelva a
+     * preguntar comida a comida en vez de dar por buena la respuesta anterior.
+     */
+    public function destroy(Request $request, PlanComida $planComida): RedirectResponse
+    {
+        abort_unless($planComida->registroDiario->usuario_id === $request->user()->id, 403);
+
+        try {
+            $borrada = $this->comidaRealService->eliminar($planComida);
+        } catch (DayAlreadyClosedException $e) {
+            return Redirect::back(fallback: route('planes.show', $planComida->registroDiario))
+                ->with('error', $e->getMessage());
+        }
+
+        return Redirect::route('planes.show', $planComida->registroDiario)
+            ->with('status', $borrada ? 'comida-real-eliminada' : 'comida-real-inexistente');
+    }
 }

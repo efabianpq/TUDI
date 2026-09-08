@@ -26,7 +26,8 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="min-h-[100dvh] bg-tudi-bg font-sans text-tudi-ink antialiased">
-        <div class="flex min-h-[100dvh] flex-col items-center justify-center px-4 py-10">
+        {{-- Mismo descuento del safe area que el layout de la app (sección 5.12). --}}
+        <div class="flex min-h-[100dvh] flex-col items-center justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+2.5rem)] pt-[calc(env(safe-area-inset-top)+2.5rem)]">
             <a href="/" class="text-tudi-ink no-underline">
                 <x-tudi.marca :size="46" :texto="26" />
             </a>

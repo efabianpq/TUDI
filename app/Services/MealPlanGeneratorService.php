@@ -50,19 +50,25 @@ class MealPlanGeneratorService
      *
      * @param  array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}  $planNutricional
      *                                                                                                                       result of NutritionCalculatorService::calculatePlan()
+     * @param  array<string, float>|null  $reparto  proporción por comida (sección 5.14); null usa el reparto de fábrica
      * @return Collection<int, PlanComida>
      *
      * @throws NoIngredientsAvailableException when the day has no reported ingredients
      */
-    public function generarPlan(RegistroDiario $registroDiario, array $planNutricional): Collection
+    public function generarPlan(RegistroDiario $registroDiario, array $planNutricional, ?array $reparto = null): Collection
     {
+        // El reparto vigente del día si quien llama lo conoce (sección 5.14);
+        // el de fábrica en otro caso, que es el que este camino heurístico ha
+        // usado siempre.
+        $reparto ??= self::DISTRIBUCION_COMIDAS;
+
         $inventario = $this->inventarioDisponible($registroDiario);
 
         if ($inventario === []) {
             throw NoIngredientsAvailableException::paraRegistroDiario($registroDiario->id);
         }
 
-        return DB::transaction(function () use ($registroDiario, $planNutricional, &$inventario) {
+        return DB::transaction(function () use ($registroDiario, $planNutricional, $reparto, &$inventario) {
             $yaConsumidas = $registroDiario->planesComida()
                 ->has('comidaReal')
                 ->get()
@@ -72,7 +78,7 @@ class MealPlanGeneratorService
 
             $planes = new Collection;
 
-            foreach (self::DISTRIBUCION_COMIDAS as $tipoComida => $porcentaje) {
+            foreach ($reparto as $tipoComida => $porcentaje) {
                 if ($yaConsumidas->has($tipoComida)) {
                     $planes->push($yaConsumidas->get($tipoComida));
 

@@ -110,6 +110,10 @@
 
     $nivelElegido = $masCercano($nivelesActividad, $inicial['nivel']);
     $objetivoElegido = $masCercano($objetivos, (float) $inicial['porcentaje']);
+
+    // Material de apoyo publicado desde la consola (sección 5.15). Sin nada
+    // publicado, la pantalla es exactamente la de antes.
+    $hayMaterial = $videoIncrustado !== null || $guiaPdf !== null;
 @endphp
 
 <x-app-layout>
@@ -128,12 +132,21 @@
         cifra persistida. Quien calcula y guarda `users.calorias_objetivo` es
         siempre NutritionCalculatorService en el servidor, al pulsar el botón.
     --}}
-    <form method="post" action="{{ route('calculadora.update') }}" class="mx-auto max-w-2xl space-y-5"
+    {{--
+        Con material de apoyo publicado la Calculadora se ensancha y el video
+        va al lado del objetivo en escritorio (CLAUDE.md sección 5.15); sin él,
+        la pantalla es exactamente la de siempre. Los controles se quedan en
+        max-w-2xl en los dos casos: ensancharlos no los haría más legibles.
+    --}}
+    <form method="post" action="{{ route('calculadora.update') }}"
+          class="mx-auto space-y-5 {{ $hayMaterial ? 'max-w-5xl' : 'max-w-2xl' }}"
           x-data="calculadoraDeficit(@js($inicial))"
           x-on:input="tocado = true"
           x-on:change="tocado = true">
         @csrf
         @method('put')
+
+        <div class="grid gap-5 {{ $hayMaterial ? 'lg:grid-cols-2 lg:items-start' : '' }}">
 
         {{-- ── El resultado, arriba ── --}}
         <div class="tudi-panel on-dark">
@@ -146,10 +159,12 @@
 
             <p class="tudi-meta mt-1" x-text="resumenDelDeficit"></p>
 
+            {{-- Palabra completa, no la inicial: aquí el espacio lo permite
+                 (CLAUDE.md sección 5.12). --}}
             <div class="mt-3.5 flex flex-wrap gap-1.5">
-                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`P ${entero(proteinaG)} g`"></span>
-                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`G ${entero(grasaG)} g`"></span>
-                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`C ${entero(carbohidratosG)} g`"></span>
+                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`{{ __('Proteína') }} ${entero(proteinaG)} g`"></span>
+                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`{{ __('Grasas') }} ${entero(grasaG)} g`"></span>
+                <span class="tudi-chip bg-tudi-dark-3 text-tudi-on-dark" x-text="`{{ __('Carbohidratos') }} ${entero(carbohidratosG)} g`"></span>
             </div>
 
             {{--
@@ -174,8 +189,41 @@
             </p>
         </div>
 
+        {{-- ── Material de apoyo, si el administrador publicó alguno ── --}}
+        @if ($hayMaterial)
+            <div class="tudi-card space-y-4 p-5">
+                <p class="tudi-label">{{ __('Cómo funciona tu objetivo') }}</p>
+
+                @if ($videoIncrustado)
+                    {{-- aspect-video: el iframe se adapta al ancho de la
+                         columna sin recortarse en móvil. --}}
+                    <div class="aspect-video w-full overflow-hidden rounded-tudi-sm bg-tudi-dark">
+                        <iframe src="{{ $videoIncrustado }}"
+                                title="{{ __('Video explicativo de la Calculadora Déficit') }}"
+                                class="h-full w-full"
+                                loading="lazy"
+                                referrerpolicy="strict-origin-when-cross-origin"
+                                allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                                allowfullscreen></iframe>
+                    </div>
+                @endif
+
+                @if ($guiaPdf)
+                    <a href="{{ $guiaPdf['url'] }}" download
+                       class="tudi-btn tudi-btn-secondary tudi-btn-block gap-2.5 no-underline">
+                        <svg class="h-5 w-5 flex-none" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" />
+                        </svg>
+                        {{ __('Descargar la guía en PDF') }}
+                    </a>
+                @endif
+            </div>
+        @endif
+
+        </div>
+
         {{-- ── Los controles ── --}}
-        <div class="tudi-card space-y-6 p-5">
+        <div class="tudi-card mx-auto w-full max-w-2xl space-y-6 p-5">
             <div>
                 <p class="mb-2 text-[13px] font-semibold">{{ __('Sexo biológico') }}</p>
                 <div class="tudi-seg">

@@ -144,6 +144,14 @@ Es **idempotente**: si ya está todo enlazado no hace nada y no imprime nada, as
 
 Si se usa la Opción B (todo el proyecto directamente en `public_html/`), este paso no aplica: cualquier archivo nuevo en `public/` está disponible de inmediato.
 
+**Nota sobre lo que ya está enlazado:** el bucle enlaza el primer nivel de `public/`. Un archivo nuevo *dentro* de una carpeta ya enlazada llega solo — los iconos de macros (`public/icons/macros/*.png`) viajan dentro del enlace `icons` que ya existe, y el PDF de la guía se sirve por el enlace `storage`, que apunta a `storage/app/public`. Lo que hay que enlazar a mano es siempre una **carpeta o archivo nuevo de primer nivel**.
+
+### Recursos didácticos: el PDF necesita `storage:link`
+
+El video de la Calculadora es una URL incrustada y no toca el servidor, pero la guía en PDF que sube el administrador se guarda en `storage/app/public/recursos/` (CLAUDE.md sección 5.15). Sin `php artisan storage:link` (y su enlace correspondiente en `public_html` con la Opción A), el PDF se sube bien pero su enlace de descarga da 404. Es el mismo enlace que ya usan las fotos de evidencia de las comidas, así que en un despliegue existente no hay nada nuevo que hacer.
+
+Los recursos publicados se cachean para siempre y la caché se invalida sola al guardar desde la consola. Si se toca la tabla `recursos_didacticos` a mano en la base de datos, hace falta `php artisan cache:clear`.
+
 ## 8. Diagnóstico y error 504 (Gateway Time-out)
 
 ```bash

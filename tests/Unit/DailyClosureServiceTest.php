@@ -237,3 +237,106 @@ test('a day whose meals were never logged closes with zero consumption', functio
         ->and($resumen['cumplimiento_proteina_pct'])->toBe(0.0)
         ->and($resumen['deficit_diario'])->toEqualWithDelta(2112.0, 0.01);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Grasa y carbohidratos del snapshot (CLAUDE.md sección 5.5)
+|--------------------------------------------------------------------------
+*/
+
+test('el cierre congela también la grasa y los carbohidratos, objetivo y consumidos', function () {
+    $usuario = usuarioDeCierre();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $planComida = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'almuerzo',
+        'calorias_estimadas' => 800,
+    ]);
+
+    ComidaReal::factory()->for($planComida, 'planComida')->create([
+        'calorias_reales' => 800,
+        'proteina_g' => 50,
+        'grasa_g' => 25,
+        'carbohidratos_g' => 90,
+    ]);
+
+    $resumen = app(DailyClosureService::class)->cerrar($registroDiario);
+
+    // Objetivos del perfil: grasa 80 * 0.8 = 64 g; carbohidratos, el resto de
+    // las 2112 kcal después de proteína (160 g -> 640 kcal) y grasa (576 kcal),
+    // es decir 896 kcal / 4 = 224 g.
+    expect($resumen['grasa_objetivo_g'])->toEqualWithDelta(64.0, 0.01)
+        ->and($resumen['carbohidratos_objetivo_g'])->toEqualWithDelta(224.0, 0.01)
+        ->and($resumen['grasa_consumida_g'])->toEqualWithDelta(25.0, 0.01)
+        ->and($resumen['carbohidratos_consumidos_g'])->toEqualWithDelta(90.0, 0.01);
+
+    // Y quedan persistidos, no recalculados: cambiar el perfil no los mueve.
+    $usuario->update(['grasa_factor' => 1.0]);
+
+    $congelado = app(DailyClosureService::class)->resumen($registroDiario->fresh());
+
+    expect($congelado['grasa_objetivo_g'])->toEqualWithDelta(64.0, 0.01);
+});
+
+test('un día cerrado antes de guardar grasa y carbohidratos los devuelve ausentes, no cero', function () {
+    $registroDiario = RegistroDiario::factory()->for(usuarioDeCierre(), 'usuario')->cerrado()->create([
+        'fecha' => now()->toDateString(),
+        'grasa_objetivo_g' => null,
+        'carbohidratos_objetivo_g' => null,
+    ]);
+
+    $resumen = app(DailyClosureService::class)->resumen($registroDiario);
+
+    expect($resumen['grasa_objetivo_g'])->toBeNull()
+        ->and($resumen['carbohidratos_consumidos_g'])->toBeNull();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Por qué no hay recomendaciones (sección 5.6)
+|--------------------------------------------------------------------------
+*/
+
+test('el diagnóstico dice qué falta para que haya recomendaciones', function () {
+    $registroDiario = diaCompleto(usuarioDeCierre());
+
+    $diagnostico = app(DailyClosureService::class)->diagnosticoRecomendaciones($registroDiario);
+
+    // Un solo día de historial: ni ventana completa ni dos pesajes que comparar.
+    expect($diagnostico['dias_con_datos'])->toBe(1)
+        ->and($diagnostico['dias_necesarios'])->toBe(7)
+        ->and($diagnostico['historial_completo'])->toBeFalse()
+        ->and($diagnostico['comparacion_de_peso_lista'])->toBeFalse()
+        ->and($diagnostico['listo'])->toBeFalse();
+});
+
+test('el diagnóstico se da por listo con siete días y un pesaje en cada semana', function () {
+    $usuario = usuarioDeCierre();
+
+    // Catorce días seguidos; solo dos de ellos con peso, uno en cada ventana:
+    // pesarse a diario no es requisito (sección 5.7).
+    foreach (range(0, 13) as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'peso_kg' => match ($atras) {
+                0 => 79.0,
+                10 => 80.0,
+                default => null,
+            },
+        ]);
+    }
+
+    $hoy = RegistroDiario::where('usuario_id', $usuario->id)
+        ->whereDate('fecha', now()->toDateString())
+        ->first();
+
+    $diagnostico = app(DailyClosureService::class)->diagnosticoRecomendaciones($hoy);
+
+    expect($diagnostico['historial_completo'])->toBeTrue()
+        ->and($diagnostico['dias_con_peso'])->toBe(1)
+        ->and($diagnostico['dias_con_peso_anterior'])->toBe(1)
+        ->and($diagnostico['listo'])->toBeTrue()
+        ->and($diagnostico['ritmo_pct'])->not->toBeNull();
+});

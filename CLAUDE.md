@@ -31,6 +31,8 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Cálculo nutricional | `app/Services/NutritionCalculatorService.php` (fuente de verdad, sección 7) |
 | Calculadora Déficit | `app/Http/Controllers/ProfileParametersController.php` (rutas `/calculadora`) |
 | Planes diarios (hub del día) | `app/Http/Controllers/PlanComidaController.php`, compone `MealDistributionService` + `ActivitySuggestionService` + `DailyClosureService` |
+| Ciclo de vida de un plan diario | `app/Services/PlanDiarioService.php` (reiniciar / eliminar el día) |
+| Reparto entre comidas | `app/Services/RepartoComidasService.php` |
 | Distribución de comidas con IA | `app/Services/MealDistributionService.php`, `app/Services/AI/MealDistributionProviderInterface.php` + `GeminiMealDistributionProvider.php` (vigente) |
 | Registro de comida real | `app/Services/ComidaRealService.php`, `app/Models/PlanComida.php`, `app/Models/ComidaReal.php` |
 | Actividad física | `app/Services/ActivitySuggestionService.php`, `app/Services/ActivityCorrectionService.php`, `app/Models/ActividadFisica.php` |
@@ -39,8 +41,9 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Analítica de tendencias | `app/Services/TrendAnalyticsService.php`, `app/Services/SeguimientoService.php`, `app/Console/Commands/CalculateTrends.php` (`dailyAt('00:30')`) |
 | Inicio (dashboard) | `app/Http/Controllers/DashboardController.php` |
 | Dictado por voz | `app/Services/AI/TranscripcionAudioProviderInterface.php` + `GeminiTranscripcionProvider.php`, `app/Http/Controllers/TranscripcionController.php` |
-| Consola de administración | `app/Http/Controllers/Admin/UsuarioController.php` + `ParametroMaestroController.php`, `app/Http/Middleware/EnsureEsAdministrador.php` |
+| Consola de administración | `app/Http/Controllers/Admin/UsuarioController.php` + `ParametroMaestroController.php` + `RecursoDidacticoController.php`, `app/Http/Middleware/EnsureEsAdministrador.php` |
 | Parámetros maestros | `app/Services/ParametrosMaestrosService.php`, `app/Models/ParametroMaestro.php` |
+| Material de apoyo (video, PDF) | `app/Services/RecursosDidacticosService.php`, `app/Models/RecursoDidactico.php` |
 | Diagnóstico y administración de despliegue | `app/Console/Commands/Diagnostico.php` (`tudi:diagnostico`), `app/Console/Commands/HacerAdministrador.php` (`tudi:hacer-admin`) |
 
 **Regla no negociable:** los controladores son delgados (reciben, validan con Form Requests, delegan). Toda la lógica de negocio vive en `app/Services`. Nada de lógica de negocio en modelos Eloquent ni en controladores.
@@ -52,14 +55,15 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 `Usuario` 1—N `MetricaTendencia`
 
 - **Nombres de tabla explícitos** (`protected $table`) porque el pluralizador de Laravel no acierta con compuestos en español: `registros_diarios`, `planes_comida`, `comidas_reales`, `actividades_fisicas`, `metricas_tendencia`, `recomendaciones_sistema`, `ingredientes_disponibles` (sin usar, sección 6), `parametros_maestros`.
-- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora) + administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1).
-- **`registros_diarios`**: `usuario_id` + `fecha` (único), `peso_kg` del día, las cinco cifras del cierre (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, `proteina_objetivo_g`, `proteina_consumida_g`), `cerrado` + `cerrado_en`, y `ingredientes_desayuno`/`ingredientes_almuerzo`/`ingredientes_cena` (texto libre por comida).
+- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora), `reparto_comidas` (json nullable, el reparto habitual — sección 5.14) + administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1).
+- **`registros_diarios`**: `usuario_id` + `fecha` (único), `peso_kg` del día, el snapshot del cierre (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, y objetivo/consumido de los tres macros: `proteina_objetivo_g`/`proteina_consumida_g`, `grasa_objetivo_g`/`grasa_consumida_g`, `carbohidratos_objetivo_g`/`carbohidratos_consumidos_g`), `cerrado` + `cerrado_en`, `ingredientes_desayuno`/`ingredientes_almuerzo`/`ingredientes_cena` (texto libre por comida) y `reparto_comidas` (json nullable, el reparto de ese día).
 - **`planes_comida`**: `tipo_comida` enum(desayuno,almuerzo,cena,snack), macros estimados, `descripcion` + `preparacion` + `notas_ia`, `ingredientes_detalle` (json, snapshot denormalizado a propósito — sigue siendo legible aunque se editen los ingredientes de origen).
 - **`comidas_reales`**: `plan_comida_id` único (relación 1—1, nunca se sobrescribe el plan), macros reales, `consumido_en`, `notas`, `imagen_evidencia`.
 - **`actividades_fisicas`**: `calorias_dispositivo`, `factor_correccion` (0.8–0.9), `calorias_ajustadas`, `pasos`, `fuente` enum(manual,dispositivo).
 - **`metricas_tendencia`**: promedios móviles de 7 días (`promedio_movil_peso_kg`, `promedio_movil_calorias`, `promedio_movil_deficit_kcal`), `indice_consistencia_pct`, `dias_con_datos`, `porcentaje_perdida_semanal`, `tendencia` enum.
 - **`recomendaciones_sistema`**: `estado` enum(pendiente,confirmada,rechazada) default `pendiente` — nunca se aplica un ajuste sin confirmación (sección 8).
 - **`parametros_maestros`**: `clave` única, `valor` (texto), `actualizado_por` — solo guarda lo que el administrador cambió; una clave ausente significa "el valor de fábrica".
+- **`recursos_didacticos`**: `clave` única, `tipo` (url|archivo), `valor`, `nombre_original`, `actualizado_por` — misma forma que la anterior pero para contenido, no umbrales (sección 5.15).
 - **`onDelete`: cascade en todas las FKs** — no hay catálogo compartido en el modelo de datos.
 
 `ComidaReal` es una entidad separada de `PlanComida` a propósito: preserva el historial "planificado vs. ejecutado". No cambiar este diseño sin discutirlo.
@@ -82,6 +86,7 @@ Cualquiera puede registrarse (`RegisteredUserController` → `CuentaService::reg
 Primer paso del flujo, dimensiona todo lo demás. `ProfileParametersController` (rutas `calculadora.edit`/`calculadora.update`; la clase conserva su nombre de la época en que la ruta se llamaba `/profile/parametros`).
 
 - **Orientada a objetivo, no a factores.** Pregunta sexo, peso, estatura, edad, **"¿qué tan activo eres?"** (cuatro escalones con explicación visible bajo el control — excepción documentada a la regla 8 de la sección 13) y **"tu objetivo"** (Mantener/−10%/−20%/−30%, también explicado). Proteína y grasa se **derivan** del objetivo elegido (cuanto más agresivo el déficit, más proteína) y quedan en "Ajustes avanzados", editables a mano si se necesita.
+- **Material de apoyo** (sección 5.15): si el administrador publicó video o guía en PDF, aparecen en una tarjeta al lado de "Tu objetivo diario" (debajo en móvil) y la pantalla se ensancha a `max-w-5xl`. Sin nada publicado, la Calculadora se ve exactamente igual que sin la funcionalidad.
 - El resultado se muestra **arriba** del formulario, recalculado en vivo por un espejo en JS de la fórmula de la sección 7 (`calculadoraDeficit()` en la vista) — la cifra que se persiste la calcula siempre `NutritionCalculatorService` en el servidor, al guardar.
 - `ProfileParametersController@update` calcula y persiste `users.calorias_objetivo`, que es **el objetivo calórico vigente**: lo consumen `MealDistributionService` y `DailyClosureService` en vez de recalcular desde la fórmula cruda, y solo lo mueve `RulesEngineService::confirmar()` (sección 5.6) o una edición explícita de parámetros. Si el cálculo lanza `NegativeCarbohydrateException`/`InvalidNutritionParameterException` no se persiste nada.
 - Se ve en toda la plataforma junto al nombre del usuario en la navegación.
@@ -99,7 +104,7 @@ Primer paso del flujo, dimensiona todo lo demás. `ProfileParametersController` 
 | a generar | texto nuevo/cambiado, o pedida con `rehacer` | recibe su parte proporcional del 25/40/35 |
 | reservada | sin texto todavía | se aparta su parte, no se resuelve |
 
-- `MealPlanGeneratorService::DISTRIBUCION_COMIDAS` (`desayuno 0.25 / almuerzo 0.40 / cena 0.35`) es el único sitio donde vive el reparto.
+- `MealPlanGeneratorService::DISTRIBUCION_COMIDAS` (`desayuno 0.25 / almuerzo 0.40 / cena 0.35`) declara qué comidas hay y el reparto **de fábrica**; cuál rige en cada día lo resuelve `RepartoComidasService` (sección 5.14).
 - "Rehacer solo el X" fuerza a regenerar una comida sin texto nuevo; una comida con `ComidaReal` nunca se regenera.
 - Los presupuestos por comida y los totales de cada plan los calcula **PHP**, nunca el modelo (regla 7, sección 13).
 - **`GeminiMealDistributionProvider`** (vigente): `generateContent` con salida estructurada (`responseSchema`, tipos en mayúsculas), `temperature = 0.1`, sin razonamiento extendido (`thinkingBudget: 0`), `GEMINI_MODEL=gemini-flash-latest` (alias flotante — Google retira versiones numeradas con frecuencia). Timeout 20 s / connect 5 s (sección 5.13). Ningún fallo produce 500: `MealDistributionUnavailableException` cubre sin clave, fallo del proveedor, bloqueo de seguridad, corte por `MAX_TOKENS`, respuesta ininterpretable o "nada que distribuir". El texto del usuario se guarda aunque la generación falle. `ClaudeMealDistributionProvider` sigue en el repo sin bindear (proveedor anterior, por si hiciera falta volver atrás).
@@ -114,11 +119,15 @@ Primer paso del flujo, dimensiona todo lo demás. `ProfileParametersController` 
 
 ### 5.5 Cierre diario
 
-`DailyClosureService`: `resumen()` (vista previa si el día está abierto, snapshot congelado si está cerrado), `cerrar()` (calcula, persiste y congela; lanza `DayAlreadyClosedException` si ya estaba cerrado — no es idempotente a propósito), `reabrir()` (acción explícita, no-op si ya estaba abierto). Las cifras se recalculan siempre desde `ComidaReal`/`ActividadFisica`, nunca desde acumuladores.
+`DailyClosureService`: `resumen()` (vista previa si el día está abierto, snapshot congelado si está cerrado), `cerrar()` (calcula, persiste y congela; lanza `DayAlreadyClosedException` si ya estaba cerrado — no es idempotente a propósito), `reabrir()` (acción explícita, no-op si ya estaba abierto), `diagnosticoRecomendaciones()` (abajo). Las cifras se recalculan siempre desde `ComidaReal`/`ActividadFisica`, nunca desde acumuladores.
+
+El snapshot congela **objetivo y consumido de los tres macros**, no solo de la proteína: la tarjeta "Resultado real del día" los muestra los cuatro, y para un día cerrado tienen que salir del snapshot y no del perfil actual. Los días cerrados antes de que existieran esas columnas devuelven `null` y se pintan como "—", nunca como cero.
 
 Antes de cerrar, `CierreFeedbackService` pregunta comida a comida **"¿Cumpliste con lo sugerido?"**: un interruptor ("sí, lo cumplí" — crea la `ComidaReal` con los macros del plan, sin llamar al proveedor) o un texto ("contar qué comí" — las comidas descritas viajan en una sola llamada a `estimarConsumoReal()`). El texto manda sobre el interruptor. **La foto de evidencia se adjunta aquí**, junto a la respuesta de cada comida (no hay ya un botón "Registrar" por comida, que preguntaba lo mismo). Una imagen sola, sin interruptor ni texto, no crea ninguna `ComidaReal`. Un fallo del proveedor deja el día sin cerrar y sin nada a medias.
 
-Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan; escribir texto de ingredientes, generar distribución y registrar el peso sí se permiten (no alteran cifras del cierre). `CierreDiarioController` (`POST /planes/{registroDiario}/cierre|reabrir`). Automatizado: `app:run-daily-closure` cierra los `RegistroDiario` de ayer sin cerrar, `dailyAt('00:15')`.
+**Lo respondido se ve y se puede cambiar.** El cierre lista comida a comida lo que se contestó (macros reales, notas, foto). Con el día abierto, cada respuesta lleva un **"Cambiar mi respuesta"** → `DELETE /plan/{planComida}/comida-real` (`ComidaRealService::eliminar()`, borra la `ComidaReal` y su imagen y recalcula `calorias_consumidas`), que devuelve esa comida al estado "planificada" y con ella la pregunta. Es lo que hace que reabrir un día sirva de algo: `reabrir()` no borra las `ComidaReal` a propósito, así que sin esta acción el cierre daba por buena la respuesta anterior y no volvía a preguntar nada.
+
+Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan, y borrarlas también; escribir texto de ingredientes, generar distribución, cambiar el reparto y registrar el peso sí se permiten (no alteran cifras del cierre). `CierreDiarioController` (`POST /planes/{registroDiario}/cierre|reabrir`). Automatizado: `app:run-daily-closure` cierra los `RegistroDiario` de ayer sin cerrar, `dailyAt('00:15')`.
 
 ### 5.6 Motor de recomendaciones
 
@@ -130,6 +139,7 @@ Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan;
 - `confirmar()`/`rechazar()` transicionan `estado`; solo confirmar un `ajuste_calorico` con cifra no nula mueve `calorias_objetivo`. No son idempotentes (`RecomendacionYaProcesadaException` en un segundo intento).
 - `RecomendacionSistemaController` (`POST /recomendaciones/{recomendacion}/confirmar|rechazar`); se listan en el cierre y en Inicio, `Redirect::back()` vuelve a donde se pulsó.
 - Disparado desde `DailyClosureService::generarRecomendaciones()` dentro de la transacción de cierre, con los insumos de `TrendAnalyticsService` (abajo).
+- **El vacío explica por qué está vacío.** En las primeras semanas no hay nada que sugerir, y "sin recomendaciones" no distinguía "todavía no hay historial" de "tu ritmo es correcto". `DailyClosureService::diagnosticoRecomendaciones()` devuelve el avance hacia los requisitos (días con plan de 7, pesajes en cada una de las dos ventanas) y la vista lo pinta como una lista de checks, más un "¿Qué es esto?" en el cierre y en Inicio. **No se pesa a diario:** basta un pesaje en cada ventana de 7 días, porque el promedio móvil ignora los días sin peso (sección 5.7).
 
 ### 5.7 Analítica de tendencias
 
@@ -162,7 +172,7 @@ Si el navegador no puede con ninguno de los dos, el botón del micrófono queda 
 
 Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y no redirect**).
 
-- `GET /admin` — cifras y cola de activación con el código de cada pendiente a la vista.
+- `GET /admin` — cifras y cola de activación con el código de cada pendiente a la vista, más los accesos a parámetros maestros y material de apoyo.
 - `GET /admin/usuarios` — búsqueda por nombre/correo/código, filtro por estado, pendientes primero; activar/suspender/promover/degradar/regenerar código/eliminar (con confirmación, cascade se lleva todo el historial).
 - **Un administrador no puede degradarse, suspenderse ni borrarse a sí mismo** (`ActualizarUsuarioRequest::after()` + `abort_if`).
 - "Administración" es un ítem más de la barra lateral **solo para administradores**, y está en el menú del avatar; no entra en la barra inferior de móvil (esos tres destinos son el flujo diario del usuario).
@@ -171,12 +181,14 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 
 `ParametrosMaestrosService::CATALOGO` es la **única declaración** de qué parámetros existen, tipo, límites y explicación; sus valores de fábrica referencian las constantes públicas de los servicios que los consumen (no una copia). Nueve parámetros: cinco del motor de recomendaciones (sección 5.6) y cuatro de la sugerencia de actividad (sección 5.4). La tabla solo guarda lo que cambió; los valores se cachean juntos y para siempre, invalidados al guardar. Si la tabla no existe todavía (deploy antes de `migrate`), cae a los valores de fábrica sin tumbar la aplicación.
 
-**Qué NO entra, a propósito:** el reparto 25/40/35 entre comidas (desdibujaría planes ya generados, y su clave es nombre de columna), las fórmulas de la sección 7 (son la definición del producto), el modelo/timeout del proveedor de IA (configuración de despliegue, vive en `.env`).
+**Qué NO entra, a propósito:** el reparto entre comidas (no es un umbral del administrador sino una preferencia del usuario que cambia por día — sección 5.14), el material de apoyo (es contenido y uno de sus valores es un archivo subido — sección 5.15), las fórmulas de la sección 7 (son la definición del producto), el modelo/timeout del proveedor de IA (configuración de despliegue, vive en `.env`).
 
 ### 5.12 Identidad visual, mobile-first y shell instalable
 
 - **`resources/css/tudi-tokens.css`** es la única fuente de verdad de color, tipografía, radio y espaciado; se importa antes de las directivas de Tailwind. `tailwind.config.js` refleja los mismos valores — si un token cambia, se cambia en el CSS y se copia allí, nunca al revés. Fondo crema siempre, un panel carbón por pantalla con la cifra protagonista, **lima solo para progreso** (sobre crema el primario es carbón), ámbar para avisos (no hay rojo en la paleta).
 - **Navegación:** barra lateral de 232px en escritorio, barra inferior fija de tres destinos (Inicio/Calculadora/Planes) en móvil, `aria-current="page"` en el activo. Objetivos táctiles de 44px mínimo. Componentes compartidos (`x-text-input`, `x-primary-button`) fijan 48px de alto y 16px de tipografía (evita el zoom automático de Safari).
+- **Safe area, arriba y abajo.** Con `viewport-fit=cover` + `apple-mobile-web-app-status-bar-style: black-translucent`, instalada como app en iOS la página empieza **debajo del reloj y la señal**. `main` descuenta `env(safe-area-inset-top)` en móvil (`pt-[calc(env(safe-area-inset-top)+1.25rem)]`, `sm:pt-8`) y el layout de invitado hace lo mismo arriba y abajo; sin eso, la cabecera —y con ella el menú de la cuenta— quedaba solapada con la barra del sistema y no se podía pulsar. En el navegador, sin instalar, el inset es cero y el espaciado es el de siempre.
+- **Macros: palabra completa donde cabe, icono donde no.** En los paneles carbón (Objetivo del día, Tu objetivo diario) van "Proteína / Grasas / Carbohidratos" enteros. En los chips compactos sobre crema va el icono ilustrado del branding (`public/icons/macros/*.png`, generados de `resources/branding/`), vía `<x-tudi.macro tipo valor variante>`. Nunca la inicial suelta: "P/G/C" no dice nada a quien empieza. El arte trae su propio fondo crema, así que se recorta en círculo y no se usa sobre oscuro.
 - **Acordeón de comidas** en el plan diario: `<details>` nativos con un solo abierto a la vez (listener en captura, `toggle` no burbujea).
 - **Instalable como app:** `public/manifest.webmanifest` + metas de Apple + iconos generados del isotipo (`public/icons/`), en los dos layouts. `min-h-[100dvh]` (no `100vh`) para que el alto útil sea idéntico en todas las pantallas. `x-tudi.instalar` ofrece el instalador nativo en Android y explica el gesto en iOS. **Límite honesto:** sin instalar, ninguna web puede ocultar la barra de URL de Safari.
 - **En Hostinger (Opción A, proyecto fuera de `public_html`): cualquier archivo nuevo en `public/` necesita enlazarse a mano en `public_html`** tras el `git pull` — ver `DEPLOY.md` sección 7, paso de sincronización obligatorio.
@@ -192,14 +204,42 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 - `php artisan tudi:diagnostico`: comprueba en segundos y solo leyendo entorno/timezone, límites de PHP, latencia y tablas de la base de datos, migraciones pendientes, driver de sesión, cola, permisos, `public/build/manifest.json`, y si el hosting bloquea la salida HTTPS a Gemini. Código de salida distinto de cero si algo crítico falla.
 - `DEPLOY.md` sección 8 documenta el triaje completo de un 504 (`/up`, pool de PHP-FPM, por qué `SESSION_DRIVER=file` lo provoca).
 
+### 5.14 Reparto de calorías entre comidas
+
+`RepartoComidasService` resuelve, en este orden, cuál rige: **el del día** (`registros_diarios.reparto_comidas`) → **el habitual del usuario** (`users.reparto_comidas`) → **el de fábrica** (`MealPlanGeneratorService::DISTRIBUCION_COMIDAS`, 25/40/35). `null` en las dos columnas significa "el de fábrica", así que cambiar el valor de fábrica alcanza a quien nunca lo personalizó.
+
+- **Se ajusta desde el plan diario** (`POST /planes/{registroDiario}/reparto`, desplegable "Reparto del día"): tres porcentajes enteros que deben sumar 100, mínimo 5% por comida, con una casilla **"guardar como mi reparto habitual"** que además lo adopta en el perfil para los días nuevos.
+- **No recalcula nada ya generado.** Los macros de un `PlanComida` están persistidos; el reparto dimensiona los objetivos que se muestran y el presupuesto de lo que queda por generar. Cuando solo faltan dos comidas, lo disponible se reparte con los pesos del reparto vigente, no a partes iguales.
+- La validación vive en el servicio (`desdePorcentajes()` lanza `InvalidArgumentException`), no solo en `RepartoComidasRequest`: el reparto se consume fuera de HTTP. Un reparto persistido que no suma 1.0 (una fila tocada a mano) se ignora y se cae al siguiente escalón.
+- Las **claves** siguen saliendo de `DISTRIBUCION_COMIDAS` porque son nombres de columna (`ingredientes_*`) y de campo de formulario; lo único que varía es el porcentaje.
+
+### 5.15 Material de apoyo (`/admin/recursos`)
+
+`RecursosDidacticosService::CATALOGO` declara los dos recursos que existen: `calculadora_video_url` (tipo `url`) y `calculadora_guia_pdf` (tipo `archivo`). El administrador los publica desde la consola y el usuario los ve en la Calculadora (sección 5.2).
+
+- **El video se incrusta, no se aloja.** `urlIncrustable()` traduce un enlace de YouTube o Vimeo a su URL de reproducción (`youtube-nocookie.com/embed/…`); cualquier otra URL no se incrusta y la consola lo avisa. Servir un MP4 desde el hosting compartido ocuparía un worker de PHP-FPM por reproducción (sección 5.13). **El PDF sí se sube**, a `storage/app/public/recursos` (máximo 20 MB); reemplazarlo borra el anterior del disco.
+- Tabla y servicio propios, no `parametros_maestros`: aquello son umbrales numéricos con mínimo/máximo cuyo catálogo referencia constantes de servicios; esto es contenido con un archivo detrás. Misma mecánica de caché (para siempre, invalidada al guardar) y la misma tolerancia a que la tabla no exista todavía.
+- Sin nada publicado, la Calculadora se ve exactamente igual que antes de que existiera la funcionalidad.
+
+### 5.16 Reiniciar y eliminar un plan diario
+
+`PlanDiarioService`, dos acciones destructivas que el usuario pide explícitamente y que van detrás de una confirmación en línea (nunca `confirm()` de JavaScript):
+
+- **`resetear()`** (`POST /planes/{registroDiario}/resetear`, botón "Reiniciar este día" al final del plan): deja el día como recién creado — sin planes de comida, sin lo registrado, sin actividades, sin recomendaciones, sin textos de ingredientes, sin peso, sin las cifras del cierre y abierto. Conserva la fecha y el reparto del día.
+- **`eliminar()`** (`DELETE /planes/{registroDiario}`, desde el listado y desde el propio plan): borra el `RegistroDiario`; las FK `cascade` se llevan el resto.
+
+Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada de la base de datos se lleva las filas, pero no los archivos del disco.
+
+**Por qué el reset también borra el peso:** "volver a empezar" incluye el peso, y dejarlo suelto en un día del que no queda nada sería un dato huérfano. No rompe la ventana de 7 días — el promedio móvil ignora los días sin peso en vez de contarlos como cero (sección 5.7) y el índice de consistencia mide días cerrados, no pesajes. El seguimiento no depende solo del peso: nadie se pesa a diario.
+
 ## 6. Rutas y código sin usar, conservados a propósito
 
 No son deuda técnica olvidada — cada uno se conserva por una razón concreta y está cubierto por tests:
 
 - **Ingredientes estructurados** (`IngredienteDisponibleController`, rutas `/ingredientes`): el camino normal es el texto libre del plan diario (sección 5.3); estas rutas siguen siendo la entrada de `MealPlanGeneratorService`.
-- **`MealPlanGeneratorService` + `POST /planes/{registroDiario}/generar`**: heurística de reparto por macro (proteína → grasa → carbohidratos) sobre ingredientes estructurados. Sustituida por la distribución con IA (sección 5.3) como camino del usuario, pero sigue funcionando y probada.
+- **`MealPlanGeneratorService` + `POST /planes/{registroDiario}/generar`**: heurística de reparto por macro (proteína → grasa → carbohidratos) sobre ingredientes estructurados. Sustituida por la distribución con IA (sección 5.3) como camino del usuario, pero sigue funcionando y probada. Su constante `DISTRIBUCION_COMIDAS` no es código muerto: es la declaración de qué comidas hay y del reparto de fábrica (sección 5.14).
 - **`NutritionAiProviderInterface` + `RuleBasedNutritionProvider`**: desacopla "quién decide" la selección de ingredientes sobre inventario estructurado (usada por `MealPlanGeneratorService`) de una futura IA generativa para ese mismo problema — distinto del problema que resuelve `MealDistributionProviderInterface` (interpretar lenguaje natural).
-- **`ComidaRealController`** (`/plan/{planComida}/comida-real`, "Registrar con detalle"): el botón por comida desapareció del plan diario (sección 5.3); sigue disponible para corregir macros exactos a mano.
+- **`ComidaRealController@create`/`@store`** (`/plan/{planComida}/comida-real`, "Registrar con detalle"): el botón por comida desapareció del plan diario (sección 5.3); sigue disponible para corregir macros exactos a mano. `@destroy` del mismo controlador **sí** está enlazado — es el "Cambiar mi respuesta" del cierre (sección 5.5).
 - **`ClaudeMealDistributionProvider`**: proveedor de IA anterior a Gemini, sin bindear, por si hiciera falta volver atrás.
 
 ## 7. Algoritmo de cálculo nutricional (fuente de verdad)

@@ -30,6 +30,18 @@
     $comidaAbierta = collect($comidas)->firstWhere('estado', '!=', 'registrada')['tipo'] ?? null;
 
     $caloriasActividad = $actividades->sum(fn ($registro) => (float) $registro->calorias_ajustadas);
+
+    // Comidas que ya tienen respuesta: el cierre las muestra con lo que se
+    // contestó y, con el día abierto, deja cambiarla (sección 5.5).
+    $comidasRespondidas = collect($comidas)->where('estado', 'registrada');
+
+    // ¿Este día usa el 25/40/35 de fábrica o uno propio? (sección 5.14)
+    $esRepartoDeFabrica = collect($repartoDeFabrica)
+        ->every(fn ($proporcion, $tipo) => abs(($reparto[$tipo] ?? 0) - $proporcion) < 0.005);
+
+    $repartoLegible = collect($reparto)
+        ->map(fn ($proporcion, $tipo) => (int) round($proporcion * 100).'% '.$tipo)
+        ->implode(', ');
 @endphp
 
 <x-app-layout>
@@ -63,10 +75,14 @@
             'distribucion-generada' => __('Distribución generada.'),
             'plan-generado' => __('Plan generado.'),
             'comida-real-guardada' => __('Comida registrada.'),
+            'comida-real-eliminada' => __('Puedes volver a responder por esa comida.'),
+            'comida-real-inexistente' => __('Esa comida no tenía nada registrado.'),
             'actividad-guardada' => __('Actividad registrada.'),
             'peso-guardado' => __('Peso registrado.'),
+            'reparto-guardado' => __('Reparto actualizado.'),
+            'plan-reiniciado' => __('Tu día quedó vacío. Empieza cuando quieras.'),
             'dia-cerrado' => __('Tu día quedó cerrado.'),
-            'dia-reabierto' => __('Tu día está abierto de nuevo.'),
+            'dia-reabierto' => __('Tu día está abierto de nuevo. Puedes cambiar tus respuestas antes de volver a cerrarlo.'),
         ]" />
     </div>
 
@@ -94,18 +110,26 @@
                 </span>
             </div>
 
-            <div class="mt-4 space-y-2.5">
+            {{--
+                Palabra completa, no la inicial (CLAUDE.md sección 5.12): aquí
+                el espacio lo permite, y "P/G/C" solo se entiende cuando ya
+                sabes lo que significan. Los iconos ilustrados van en los chips
+                compactos sobre crema, no sobre el panel carbón.
+            --}}
+            <div class="mt-4 space-y-3">
                 @foreach ([
-                    ['letra' => 'P', 'objetivo' => $objetivos['dia']['proteina_g'], 'planificado' => $proteinaPlanificada, 'color' => 'var(--tudi-lime)'],
-                    ['letra' => 'G', 'objetivo' => $objetivos['dia']['grasa_g'], 'planificado' => $grasaPlanificada, 'color' => 'var(--tudi-amber)'],
-                    ['letra' => 'C', 'objetivo' => $objetivos['dia']['carbohidratos_g'], 'planificado' => $carbohidratosPlanificados, 'color' => 'var(--tudi-on-dark)'],
+                    ['tipo' => 'proteina', 'objetivo' => $objetivos['dia']['proteina_g'], 'planificado' => $proteinaPlanificada, 'color' => 'var(--tudi-lime)'],
+                    ['tipo' => 'grasa', 'objetivo' => $objetivos['dia']['grasa_g'], 'planificado' => $grasaPlanificada, 'color' => 'var(--tudi-amber)'],
+                    ['tipo' => 'carbohidratos', 'objetivo' => $objetivos['dia']['carbohidratos_g'], 'planificado' => $carbohidratosPlanificados, 'color' => 'var(--tudi-on-dark)'],
                 ] as $macro)
-                    <div class="flex items-center gap-3">
-                        <span class="tudi-meta w-4">{{ $macro['letra'] }}</span>
-                        <span class="tudi-bar flex-1" style="--pct: {{ $porcentaje($macro['planificado'], $macro['objetivo']) }}">
+                    <div>
+                        <div class="flex items-baseline justify-between gap-2">
+                            <x-tudi.macro :tipo="$macro['tipo']" variante="palabra" class="tudi-label" />
+                            <span class="tudi-meta text-tudi-on-dark">{{ $gramos($macro['objetivo']) }} g</span>
+                        </div>
+                        <span class="tudi-bar mt-1.5 block" style="--pct: {{ $porcentaje($macro['planificado'], $macro['objetivo']) }}">
                             <span style="background: {{ $macro['color'] }}"></span>
                         </span>
-                        <span class="tudi-meta w-16 text-end text-tudi-on-dark">{{ $gramos($macro['objetivo']) }} g</span>
                     </div>
                 @endforeach
             </div>
@@ -158,7 +182,8 @@
                         <div class="tudi-card w-full max-w-md p-6">
                             <h2 class="text-lg font-semibold tracking-tudi-title">{{ __('¿Cómo funciona?') }}</h2>
                             <div class="mt-3 space-y-3 text-sm text-tudi-ink-3">
-                                <p>{{ __('Escribe o dicta lo que tienes para cada comida. Con un solo botón se reparte el día entero: cada comida recibe su parte del objetivo (25% desayuno, 40% almuerzo, 35% cena).') }}</p>
+                                <p>{{ __('Escribe o dicta lo que tienes para cada comida. Con un solo botón se reparte el día entero: cada comida recibe su parte del objetivo (:reparto).', ['reparto' => $repartoLegible]) }}</p>
+                                <p>{{ __('Ese reparto se cambia en "Reparto del día", y puedes dejarlo distinto solo para hoy o guardarlo como tu reparto habitual.') }}</p>
                                 <p>{{ __('Las tres comidas viajan juntas en una sola consulta, así que rellenarlas todas antes de generar cuesta lo mismo que rellenar una.') }}</p>
                                 <p>{{ __('No hace falta rellenar las tres. Lo que ya está generado no se toca, y las comidas sin texto guardan sus calorías para cuando las escribas.') }}</p>
                             </div>
@@ -168,6 +193,77 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {{--
+                ── Reparto del día (sección 5.14) ──
+                Fuera del formulario de distribución: son dos envíos distintos y
+                un <form> no puede anidarse dentro de otro.
+            --}}
+            <div id="seccion-reparto">
+                <details class="tudi-card" {{ $errors->has('reparto') ? 'open' : '' }}>
+                    <summary class="flex min-h-[52px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                        <span class="text-[13px] font-semibold tracking-tudi-title">{{ __('Reparto del día') }}</span>
+                        <span class="tudi-meta">
+                            {{ collect($reparto)->map(fn ($p) => (int) round($p * 100).'%')->implode(' · ') }}
+                            @unless ($esRepartoDeFabrica)
+                                <span class="text-tudi-amber-ink">{{ __('· propio') }}</span>
+                            @endunless
+                        </span>
+                    </summary>
+
+                    <form method="post" action="{{ route('planes.reparto', $registroDiario) }}" data-fetch
+                          data-fetch-secciones="#tudi-avisos,#panel-objetivo,#seccion-reparto,#lista-comidas,#seccion-cierre"
+                          x-data="{
+                              reparto: @js(collect($reparto)->map(fn ($p) => (int) round($p * 100))),
+                              get suma() { return Object.values(this.reparto).reduce((a, b) => a + Number(b || 0), 0) },
+                          }"
+                          class="px-4 pb-4">
+                        @csrf
+
+                        <div class="grid grid-cols-3 gap-2">
+                            @foreach (array_keys($repartoDeFabrica) as $tipoComida)
+                                <div>
+                                    <label for="reparto-{{ $tipoComida }}" class="tudi-label capitalize">{{ $tipoComida }}</label>
+                                    {{--
+                                        Porcentajes enteros: aquí type="number"
+                                        sí (no es un decimal — sección 9), con
+                                        los pasos de 5 que se usan de verdad.
+                                    --}}
+                                    <input id="reparto-{{ $tipoComida }}"
+                                           name="reparto[{{ $tipoComida }}]"
+                                           type="number" inputmode="numeric" min="5" max="100" step="1" required
+                                           x-model.number="reparto.{{ $tipoComida }}"
+                                           value="{{ old('reparto.'.$tipoComida, (int) round($reparto[$tipoComida] * 100)) }}"
+                                           class="tudi-input mt-1 text-center">
+                                </div>
+                            @endforeach
+                        </div>
+
+                        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                            <span class="tudi-meta" :class="suma === 100 ? '' : 'text-tudi-amber-ink'">
+                                {{ __('Suma') }} <span x-text="suma"></span>%
+                            </span>
+
+                            <label class="flex min-h-[44px] cursor-pointer items-center gap-2 text-[13px] text-tudi-ink-2">
+                                <input type="checkbox" name="como_habitual" value="1" class="peer sr-only">
+                                <span class="tudi-switch"></span>
+                                {{ __('Guardar como mi reparto habitual') }}
+                            </label>
+                        </div>
+
+                        <x-input-error :messages="$errors->get('reparto')" class="mt-2" />
+
+                        <button type="submit" class="tudi-btn tudi-btn-secondary mt-3 w-full sm:w-auto"
+                                :disabled="suma !== 100">
+                            {{ __('Aplicar reparto') }}
+                        </button>
+
+                        <p class="tudi-meta mt-2">
+                            {{ __('Solo afecta a lo que quede por generar; los planes ya hechos no cambian.') }}
+                        </p>
+                    </form>
+                </details>
             </div>
 
             {{--
@@ -248,11 +344,18 @@
                                             </ul>
                                         @endif
 
+                                        {{--
+                                            El icono ilustrado del branding en
+                                            vez de la inicial (sección 5.12): el
+                                            chip es demasiado estrecho para la
+                                            palabra completa, y "P/G/C" no dice
+                                            nada a quien empieza.
+                                        --}}
                                         <div class="flex flex-wrap items-center gap-2">
                                             <span class="tudi-chip tudi-chip-solid">{{ $kcal($plan->calorias_estimadas) }} kcal</span>
-                                            <span class="tudi-chip">P {{ $gramos($plan->proteina_g) }}</span>
-                                            <span class="tudi-chip">G {{ $gramos($plan->grasa_g) }}</span>
-                                            <span class="tudi-chip">C {{ $gramos($plan->carbohidratos_g) }}</span>
+                                            <x-tudi.macro tipo="proteina" :valor="$gramos($plan->proteina_g).' g'" class="tudi-chip" />
+                                            <x-tudi.macro tipo="grasa" :valor="$gramos($plan->grasa_g).' g'" class="tudi-chip" />
+                                            <x-tudi.macro tipo="carbohidratos" :valor="$gramos($plan->carbohidratos_g).' g'" class="tudi-chip" />
                                         </div>
 
                                         @if ($plan->notas_ia)
@@ -264,9 +367,9 @@
                                                 <p class="tudi-label">{{ __('Lo que comiste') }}</p>
                                                 <div class="mt-2 flex flex-wrap items-center gap-2">
                                                     <span class="tudi-chip tudi-chip-lime">{{ $kcal($comidaReal->calorias_reales) }} kcal</span>
-                                                    <span class="tudi-chip">P {{ $gramos($comidaReal->proteina_g) }}</span>
-                                                    <span class="tudi-chip">G {{ $gramos($comidaReal->grasa_g) }}</span>
-                                                    <span class="tudi-chip">C {{ $gramos($comidaReal->carbohidratos_g) }}</span>
+                                                    <x-tudi.macro tipo="proteina" :valor="$gramos($comidaReal->proteina_g).' g'" class="tudi-chip" />
+                                                    <x-tudi.macro tipo="grasa" :valor="$gramos($comidaReal->grasa_g).' g'" class="tudi-chip" />
+                                                    <x-tudi.macro tipo="carbohidratos" :valor="$gramos($comidaReal->carbohidratos_g).' g'" class="tudi-chip" />
                                                 </div>
                                                 @if ($comidaReal->notas)
                                                     <p class="mt-2 text-[13px] text-tudi-ink-3">{{ $comidaReal->notas }}</p>
@@ -467,6 +570,111 @@
                     </div>
                 </dl>
 
+                {{--
+                    ── Resultado real del día (CLAUDE.md sección 5.5) ──
+                    El espejo de "Objetivo del día": las mismas cuatro cifras,
+                    pero las que se comieron de verdad. Sin esto, el cierre
+                    contaba las calorías y la proteína y callaba sobre los otros
+                    dos macros, que sí se muestran arriba como objetivo.
+                --}}
+                <div class="tudi-card-inset mt-5 rounded-tudi-sm">
+                    <div class="flex items-end justify-between gap-4">
+                        <span class="tudi-label pb-1">
+                            {{ $registroDiario->cerrado ? __('Resultado real del día') : __('Lo que llevas comido') }}
+                        </span>
+                        <span class="flex items-baseline gap-1.5">
+                            <span class="tudi-num text-[30px]">{{ $kcal($resumenCierre['calorias_consumidas']) }}</span>
+                            <span class="tudi-meta">/ {{ $kcal($resumenCierre['calorias_objetivo']) }} kcal</span>
+                        </span>
+                    </div>
+
+                    <div class="mt-3 space-y-3">
+                        @foreach ([
+                            ['tipo' => 'proteina', 'real' => $resumenCierre['proteina_consumida_g'], 'objetivo' => $resumenCierre['proteina_objetivo_g'], 'color' => 'var(--tudi-lime-700)'],
+                            ['tipo' => 'grasa', 'real' => $resumenCierre['grasa_consumida_g'], 'objetivo' => $resumenCierre['grasa_objetivo_g'], 'color' => 'var(--tudi-amber)'],
+                            ['tipo' => 'carbohidratos', 'real' => $resumenCierre['carbohidratos_consumidos_g'], 'objetivo' => $resumenCierre['carbohidratos_objetivo_g'], 'color' => 'var(--tudi-ink)'],
+                        ] as $macro)
+                            <div>
+                                <div class="flex items-baseline justify-between gap-2">
+                                    {{-- Icono Y palabra: en esta tarjeta cabe, y es donde el
+                                         usuario compara lo comido contra su objetivo. --}}
+                                    <span class="flex items-center gap-2">
+                                        <x-tudi.macro :tipo="$macro['tipo']" />
+                                        <x-tudi.macro :tipo="$macro['tipo']" variante="palabra" class="text-[13px] font-semibold" />
+                                    </span>
+                                    <span class="tudi-meta">
+                                        {{-- Los días cerrados antes de que el snapshot guardara grasa y
+                                             carbohidratos no tienen estas cifras: se dicen ausentes, no cero. --}}
+                                        @if ($macro['real'] === null || $macro['objetivo'] === null)
+                                            —
+                                        @else
+                                            <span class="text-tudi-ink">{{ $gramos($macro['real']) }}</span>
+                                            / {{ $gramos($macro['objetivo']) }} g
+                                        @endif
+                                    </span>
+                                </div>
+                                <span class="tudi-bar on-light mt-1.5 block"
+                                      style="--pct: {{ $macro['real'] === null || $macro['objetivo'] === null ? 0 : $porcentaje($macro['real'], $macro['objetivo']) }}">
+                                    <span style="background: {{ $macro['color'] }}"></span>
+                                </span>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                {{--
+                    ── Lo que respondiste, comida a comida (sección 5.5) ──
+                    Al cerrar, el resumen decía cuántas calorías entraron pero no
+                    de dónde salía esa cifra. Con el día abierto, cada respuesta
+                    se puede cambiar: eso es lo que devuelve la pregunta después
+                    de reabrir un día.
+                --}}
+                @if ($comidasRespondidas->isNotEmpty())
+                    <div class="mt-5 border-t border-tudi-divider pt-5">
+                        <p class="tudi-label">{{ __('Lo que respondiste') }}</p>
+
+                        <ul class="mt-3 space-y-2.5">
+                            @foreach ($comidasRespondidas as $comida)
+                                @php $real = $comida['plan']->comidaReal; @endphp
+                                <li class="rounded-tudi-md border border-tudi-border p-4">
+                                    <div class="flex flex-wrap items-baseline justify-between gap-2">
+                                        <span class="font-semibold capitalize tracking-tudi-title">{{ $comida['tipo'] }}</span>
+                                        <span class="tudi-meta">
+                                            {{ $kcal($real->calorias_reales) }} kcal
+                                            <span class="text-tudi-muted">({{ __('sugerido') }} {{ $kcal($comida['plan']->calorias_estimadas) }})</span>
+                                        </span>
+                                    </div>
+
+                                    @if ($real->notas)
+                                        <p class="mt-1.5 text-[13px] text-tudi-ink-3">{{ $real->notas }}</p>
+                                    @endif
+
+                                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                                        <x-tudi.macro tipo="proteina" :valor="$gramos($real->proteina_g).' g'" class="tudi-chip" />
+                                        <x-tudi.macro tipo="grasa" :valor="$gramos($real->grasa_g).' g'" class="tudi-chip" />
+                                        <x-tudi.macro tipo="carbohidratos" :valor="$gramos($real->carbohidratos_g).' g'" class="tudi-chip" />
+                                    </div>
+
+                                    @if ($real->imagenUrl())
+                                        <img src="{{ $real->imagenUrl() }}" alt="{{ __('Evidencia visual') }}"
+                                             class="mt-2 max-h-40 rounded-tudi-sm">
+                                    @endif
+
+                                    @unless ($registroDiario->cerrado)
+                                        <form method="post" action="{{ route('comida-real.destroy', $comida['plan']) }}" class="mt-3">
+                                            @csrf
+                                            @method('delete')
+                                            <button type="submit" class="tudi-btn tudi-btn-ghost text-[13px]">
+                                                {{ __('Cambiar mi respuesta') }}
+                                            </button>
+                                        </form>
+                                    @endunless
+                                </li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+
                 @unless ($registroDiario->cerrado)
                     {{--
                         enctype multipart: desde la sección 4.23 la foto de
@@ -553,10 +761,88 @@
                 @endunless
 
                 <div class="mt-5 border-t border-tudi-divider pt-5">
-                    <p class="tudi-label">{{ __('Recomendaciones') }}</p>
+                    <div class="flex items-center justify-between gap-3">
+                        <p class="tudi-label">{{ __('Recomendaciones') }}</p>
+
+                        {{-- La ayuda va detrás de un "¿Cómo funciona?", nunca en
+                             un párrafo suelto en pantalla (sección 5.12). --}}
+                        <div x-data="{ abierto: false }" x-on:keydown.escape.window="abierto = false">
+                            <button type="button" x-on:click="abierto = true" class="tudi-link text-[13px]">
+                                {{ __('¿Qué es esto?') }}
+                            </button>
+
+                            <div x-show="abierto" style="display: none"
+                                 class="fixed inset-0 z-50 flex items-end justify-center bg-tudi-ink/60 p-4 sm:items-center"
+                                 x-on:click.self="abierto = false" role="dialog" aria-modal="true">
+                                <div class="tudi-card w-full max-w-md p-6">
+                                    <h2 class="text-lg font-semibold tracking-tudi-title">{{ __('Recomendaciones') }}</h2>
+                                    <div class="mt-3 space-y-3 text-sm text-tudi-ink-3">
+                                        <p>{{ __('Cuando tu ritmo se sale de lo esperado, TUDI te propone subir o bajar tu objetivo calórico. La propuesta nunca se aplica sola: la confirmas o la rechazas tú.') }}</p>
+                                        <p>{{ __('No mira un día suelto. Compara el promedio de los últimos 7 días con el de los 7 anteriores, así que en las primeras semanas está vacía a propósito.') }}</p>
+                                        <p>{{ __('Para que aparezca hacen falta 7 días con plan y al menos un pesaje en cada una de las dos semanas. No hay que pesarse a diario: los días sin peso no cuentan como cero, simplemente no entran en el promedio.') }}</p>
+                                    </div>
+                                    <button type="button" x-on:click="abierto = false" class="tudi-btn tudi-btn-primary tudi-btn-block mt-5">
+                                        {{ __('Entendido') }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     @if ($resumenCierre['recomendaciones']->isEmpty())
-                        <p class="mt-2 text-sm text-tudi-muted">{{ __('Sin recomendaciones para este día.') }}</p>
+                        {{--
+                            El vacío informa de por qué está vacío (sección 5.6):
+                            "todavía no hay historial" y "tu ritmo es correcto"
+                            son dos cosas distintas y antes se veían igual.
+                        --}}
+                        @if ($diagnosticoRecomendaciones === null)
+                            <p class="mt-2 text-sm text-tudi-muted">{{ __('Sin recomendaciones para este día.') }}</p>
+                        @elseif ($diagnosticoRecomendaciones['listo'])
+                            <p class="mt-2 text-sm text-tudi-ink-3">
+                                {{ __('Tu ritmo está dentro de lo esperado, así que no hay nada que ajustar.') }}
+                                @if ($diagnosticoRecomendaciones['ritmo_pct'] !== null)
+                                    <span class="tudi-meta">
+                                        {{ __('Pérdida semanal:') }} {{ number_format($diagnosticoRecomendaciones['ritmo_pct'], 2, ',', '.') }}%
+                                    </span>
+                                @endif
+                            </p>
+                        @else
+                            <p class="mt-2 text-sm text-tudi-ink-3">
+                                {{ __('Todavía no hay historial suficiente para sugerirte un ajuste.') }}
+                            </p>
+
+                            <ul class="mt-3 space-y-2">
+                                @foreach ([
+                                    [
+                                        'hecho' => $diagnosticoRecomendaciones['historial_completo'],
+                                        'texto' => __('Días con plan en la última semana'),
+                                        'cifra' => $diagnosticoRecomendaciones['dias_con_datos'].' / '.$diagnosticoRecomendaciones['dias_necesarios'],
+                                    ],
+                                    [
+                                        'hecho' => $diagnosticoRecomendaciones['dias_con_peso'] > 0,
+                                        'texto' => __('Pesajes en la última semana'),
+                                        'cifra' => (string) $diagnosticoRecomendaciones['dias_con_peso'],
+                                    ],
+                                    [
+                                        'hecho' => $diagnosticoRecomendaciones['dias_con_peso_anterior'] > 0,
+                                        'texto' => __('Pesajes en la semana anterior'),
+                                        'cifra' => (string) $diagnosticoRecomendaciones['dias_con_peso_anterior'],
+                                    ],
+                                ] as $requisito)
+                                    <li class="flex items-center justify-between gap-3 text-sm">
+                                        <span class="flex items-center gap-2.5">
+                                            <span @class([
+                                                'h-2 w-2 flex-none rounded-full',
+                                                'bg-tudi-lime' => $requisito['hecho'],
+                                                'bg-tudi-input-border' => ! $requisito['hecho'],
+                                            ])></span>
+                                            {{ $requisito['texto'] }}
+                                        </span>
+                                        <span class="tudi-meta">{{ $requisito['cifra'] }}</span>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
                     @else
                         <ul class="mt-3 space-y-4">
                             @foreach ($resumenCierre['recomendaciones'] as $recomendacion)
@@ -585,6 +871,59 @@
                             @endforeach
                         </ul>
                     @endif
+                </div>
+            </div>
+        </section>
+
+        {{--
+            ══ Empezar de cero ══ (CLAUDE.md sección 5.16)
+            Abajo del todo y detrás de una confirmación: son las dos únicas
+            acciones de esta pantalla que borran datos.
+        --}}
+        <section class="space-y-3">
+            <p class="tudi-label px-1">{{ __('Empezar de cero') }}</p>
+
+            <div class="tudi-card flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div x-data="{ confirmando: false }" class="min-w-0">
+                    <button type="button" x-show="! confirmando" x-on:click="confirmando = true"
+                            class="tudi-btn tudi-btn-secondary w-full sm:w-auto">
+                        {{ __('Reiniciar este día') }}
+                    </button>
+
+                    <form method="post" action="{{ route('planes.resetear', $registroDiario) }}"
+                          x-show="confirmando" style="display: none"
+                          class="flex flex-wrap gap-2"
+                          data-cargando="{{ __('Vaciando tu día…') }}">
+                        @csrf
+                        <button type="submit" class="tudi-btn bg-tudi-amber text-tudi-ink">
+                            {{ __('Sí, borrar lo de hoy y empezar de nuevo') }}
+                        </button>
+                        <button type="button" x-on:click="confirmando = false" class="tudi-btn tudi-btn-ghost">
+                            {{ __('Cancelar') }}
+                        </button>
+                    </form>
+
+                    <p class="tudi-meta mt-2">{{ __('Borra las sugerencias, lo registrado y la actividad. El día sigue existiendo.') }}</p>
+                </div>
+
+                <div x-data="{ confirmando: false }" class="min-w-0 sm:text-end">
+                    <button type="button" x-show="! confirmando" x-on:click="confirmando = true"
+                            class="tudi-btn tudi-btn-ghost w-full text-tudi-amber-ink sm:w-auto">
+                        {{ __('Eliminar este plan') }}
+                    </button>
+
+                    <form method="post" action="{{ route('planes.destroy', $registroDiario) }}"
+                          x-show="confirmando" style="display: none"
+                          class="flex flex-wrap gap-2 sm:justify-end">
+                        @csrf
+                        @method('delete')
+                        <button type="submit" class="tudi-btn bg-tudi-amber text-tudi-ink">
+                            {{ __('Sí, eliminar el día entero') }}
+                        </button>
+                        <button type="button" x-on:click="confirmando = false" class="tudi-btn tudi-btn-ghost">
+                            {{ __('Cancelar') }}
+                        </button>
+                    </form>
                 </div>
             </div>
         </section>

@@ -46,8 +46,16 @@
                 {{--
                     pb-28 deja sitio para la barra de navegación inferior en
                     móvil; en escritorio la navegación es la barra lateral.
+
+                    El padding superior descuenta `env(safe-area-inset-top)`
+                    (CLAUDE.md sección 5.12). Con `viewport-fit=cover` y la barra
+                    de estado translúcida de iOS, la página empieza DEBAJO del
+                    reloj y la señal: sin esto, la cabecera —y con ella el menú
+                    de la cuenta— quedaba solapada con la barra del sistema y no
+                    se podía pulsar. En el navegador, sin instalar, el inset es
+                    cero y el espaciado es el de siempre.
                 --}}
-                <main class="mx-auto flex w-full max-w-6xl flex-col px-4 pb-28 pt-5 sm:px-8 sm:pb-12 sm:pt-8">
+                <main class="mx-auto flex w-full max-w-6xl flex-col px-4 pb-28 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:px-8 sm:pb-12 sm:pt-8">
                     @isset($header)
                         <header class="mb-5 sm:mb-7">
                             {{ $header }}

@@ -286,8 +286,12 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         // Y el objetivo vigente sigue intacto: nada lo ajusta automáticamente.
         ->and((float) $usuario->fresh()->calorias_objetivo)->toBe(OBJETIVO_KCAL_FLUJO_DIARIO);
 
+    // Y la pantalla dice POR QUÉ está vacía —falta historial, no es que el
+    // ritmo sea correcto— con el avance hacia los 7 días (sección 5.6).
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
-        ->assertSee('Sin recomendaciones para este día.');
+        ->assertSee('Todavía no hay historial suficiente para sugerirte un ajuste.')
+        ->assertSee('Días con plan en la última semana')
+        ->assertSee('1 / 7');
 });
 
 test('un ajuste calórico confirmado pasa a dimensionar el plan y el cierre', function () {

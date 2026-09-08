@@ -101,5 +101,16 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7" />
             </svg>
         </a>
+
+        <a href="{{ route('admin.recursos.edit') }}"
+           class="tudi-card flex items-center justify-between gap-4 p-5 text-tudi-ink no-underline hover:bg-tudi-card-inset">
+            <span>
+                <span class="block font-semibold tracking-tudi-title">{{ __('Material de apoyo') }}</span>
+                <span class="tudi-meta">{{ __('Video y guía en PDF de la Calculadora Déficit') }}</span>
+            </span>
+            <svg class="h-5 w-5 flex-none text-tudi-muted" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7" />
+            </svg>
+        </a>
     </div>
 </x-app-layout>

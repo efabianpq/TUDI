@@ -6,6 +6,7 @@ use App\Exceptions\InvalidNutritionParameterException;
 use App\Exceptions\NegativeCarbohydrateException;
 use App\Http\Requests\ProfileParametersRequest;
 use App\Services\NutritionCalculatorService;
+use App\Services\RecursosDidacticosService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
@@ -20,6 +21,7 @@ class ProfileParametersController extends Controller
 {
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
+        private readonly RecursosDidacticosService $recursos,
     ) {}
 
     /**
@@ -29,6 +31,10 @@ class ProfileParametersController extends Controller
     {
         return view('profile.parametros', [
             'user' => $request->user(),
+            // Material de apoyo, si el administrador ha publicado alguno
+            // (sección 5.15). Sin nada publicado la tarjeta no se dibuja.
+            'videoIncrustado' => $this->recursos->urlIncrustable('calculadora_video_url'),
+            'guiaPdf' => $this->recursos->recurso('calculadora_guia_pdf'),
         ]);
     }
 

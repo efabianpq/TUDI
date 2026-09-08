@@ -76,7 +76,7 @@ class TrendAnalyticsService
      * (o null si no hay ni un dato). El índice de consistencia siempre es un
      * número: cero días cerrados de siete es 0%, no "desconocido".
      *
-     * @return array{fecha_corte: string, promedio_movil_peso_kg: float|null, promedio_movil_calorias: float|null, promedio_movil_deficit_kcal: float|null, indice_consistencia_pct: float, dias_con_datos: int, dias_cerrados: int, datos_suficientes: bool, porcentaje_perdida_semanal: float|null, tendencia: string|null}
+     * @return array{fecha_corte: string, promedio_movil_peso_kg: float|null, promedio_movil_calorias: float|null, promedio_movil_deficit_kcal: float|null, indice_consistencia_pct: float, dias_con_datos: int, dias_cerrados: int, dias_con_peso: int, dias_con_peso_anterior: int, datos_suficientes: bool, porcentaje_perdida_semanal: float|null, tendencia: string|null}
      */
     public function calcular(User $usuario, ?Carbon $fechaCorte = null): array
     {
@@ -103,6 +103,12 @@ class TrendAnalyticsService
             'indice_consistencia_pct' => $this->indiceConsistencia($diasCerrados),
             'dias_con_datos' => $ventana->count(),
             'dias_cerrados' => $diasCerrados,
+            // Días con peso registrado en cada ventana. No hacen falta los siete
+            // —nadie se pesa a diario, y el promedio ignora los días sin dato—
+            // pero sí al menos uno en cada una: sin eso no hay dos promedios que
+            // comparar y el % de pérdida semanal es null (sección 5.7).
+            'dias_con_peso' => $ventana->whereNotNull('peso_kg')->count(),
+            'dias_con_peso_anterior' => $ventanaAnterior->whereNotNull('peso_kg')->count(),
             'datos_suficientes' => $ventana->count() >= self::DIAS_VENTANA,
             'porcentaje_perdida_semanal' => $porcentajePerdida,
             'tendencia' => $this->clasificarTendencia($porcentajePerdida),

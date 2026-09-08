@@ -317,3 +317,67 @@ it('nunca pisa una comida que ya tiene su ComidaReal registrada', function () {
         // Y lo que realmente comió es lo que gasta presupuesto, no lo planificado.
         ->and($falso->llamadas[1]['contextoDia']['comidas_fijas']['desayuno']['calorias'])->toBe(400.0);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Reparto por día (CLAUDE.md sección 5.14)
+|--------------------------------------------------------------------------
+*/
+
+it('reparte con el reparto propio del día en vez del de fábrica', function () {
+    proveedorFalso();
+    $usuario = usuarioParaDistribucion();
+    $registroDiario = registroDeHoyDe($usuario, [
+        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
+    ]);
+
+    $objetivos = app(MealDistributionService::class)->objetivosDelRegistro($registroDiario);
+
+    expect($objetivos['por_comida']['desayuno']['calorias'])->toEqualWithDelta(2112 * 0.10, 0.01)
+        ->and($objetivos['por_comida']['almuerzo']['calorias'])->toEqualWithDelta(2112 * 0.50, 0.01)
+        ->and($objetivos['por_comida']['cena']['calorias'])->toEqualWithDelta(2112 * 0.40, 0.01)
+        // El día entero sigue sumando el mismo objetivo: solo cambia el reparto.
+        ->and(array_sum(array_column($objetivos['por_comida'], 'calorias')))
+        ->toEqualWithDelta(2112.0, 0.01);
+});
+
+it('manda al proveedor el presupuesto del reparto propio del día', function () {
+    $falso = proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion(), [
+        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
+    ]);
+
+    app(MealDistributionService::class)->distribuirDia($registroDiario, [
+        'desayuno' => 'huevos y pan',
+        'almuerzo' => 'pollo y arroz',
+        'cena' => 'ensalada y atún',
+    ]);
+
+    $contexto = $falso->llamadas[0]['contextoDia'];
+
+    expect($contexto['reparto'])->toBe(['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40])
+        ->and($falso->llamadas[0]['comidas']['almuerzo']['objetivos']['calorias'])
+        ->toEqualWithDelta(2112 * 0.50, 0.01);
+});
+
+it('reparte lo que queda con los pesos del reparto propio del día', function () {
+    $falso = proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion(), [
+        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
+    ]);
+
+    // Solo almuerzo y cena: el desayuno reserva su 10% y el resto se reparte
+    // 50/40 entre las dos, no a partes iguales.
+    app(MealDistributionService::class)->distribuirDia($registroDiario, [
+        'almuerzo' => 'pollo y arroz',
+        'cena' => 'ensalada y atún',
+    ]);
+
+    $comidas = $falso->llamadas[0]['comidas'];
+    $disponible = 2112 * 0.90;
+
+    expect($comidas['almuerzo']['objetivos']['calorias'])
+        ->toEqualWithDelta($disponible * (0.50 / 0.90), 0.5)
+        ->and($comidas['cena']['objetivos']['calorias'])
+        ->toEqualWithDelta($disponible * (0.40 / 0.90), 0.5);
+});

@@ -288,3 +288,92 @@ it('acepta decimales tecleados con coma en el peso del día', function () {
 
     expect((float) $registroDiario->fresh()->peso_kg)->toBe(80.4);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Legibilidad de los macros y safe area (CLAUDE.md sección 5.12)
+|--------------------------------------------------------------------------
+*/
+
+it('descuenta el safe area superior para que la cabecera no quede bajo la barra del sistema', function () {
+    // Instalada como app en iOS, la barra de estado es translúcida y la página
+    // empieza debajo del reloj: sin este padding el menú de la cuenta quedaba
+    // solapado y no se podía pulsar.
+    $this->actingAs(usuarioDelRediseno())->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('pt-[calc(env(safe-area-inset-top)+1.25rem)]', escape: false);
+});
+
+it('nombra los macros con la palabra completa donde cabe, no con la inicial', function () {
+    $usuario = usuarioDelRediseno();
+
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('Proteína')
+        ->assertSee('Grasas')
+        ->assertSee('Carbohidratos');
+
+    $this->actingAs($usuario)->get(route('calculadora.edit'))
+        ->assertOk()
+        ->assertSee('Carbohidratos');
+});
+
+it('etiqueta los macros de cada comida con su icono ilustrado', function () {
+    $usuario = usuarioDelRediseno();
+
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'desayuno',
+        'calorias_estimadas' => 500,
+        'proteina_g' => 30,
+        'grasa_g' => 15,
+        'carbohidratos_g' => 55,
+    ]);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('icons/macros/proteina.png', escape: false)
+        ->assertSee('icons/macros/grasa.png', escape: false)
+        ->assertSee('icons/macros/carbohidratos.png', escape: false);
+});
+
+it('muestra en el cierre el resultado real frente al objetivo, macro a macro', function () {
+    $usuario = usuarioDelRediseno();
+
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $plan = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'almuerzo',
+        'calorias_estimadas' => 800,
+    ]);
+
+    ComidaReal::factory()->for($plan, 'planComida')->create([
+        'calorias_reales' => 800,
+        'proteina_g' => 50,
+        'grasa_g' => 25,
+        'carbohidratos_g' => 90,
+    ]);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        // Con el día abierto es una vista previa de lo que llevas comido…
+        ->assertSee('Lo que llevas comido')
+        ->assertSee('25,0');
+
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
+
+    // …y una vez cerrado, el resultado congelado del día.
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('Resultado real del día')
+        ->assertSee('25,0');
+});

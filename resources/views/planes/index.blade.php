@@ -10,7 +10,7 @@
         </div>
     </x-slot>
 
-    <x-tudi.flash />
+    <x-tudi.flash :mensajes="['plan-eliminado' => __('Plan diario eliminado.')]" />
 
     <div class="space-y-5">
         @unless ($perfilCompleto)
@@ -49,11 +49,16 @@
         @if ($planes->isEmpty())
             <p class="px-1 text-sm text-tudi-muted">{{ __('Todavía no tienes ningún plan diario.') }}</p>
         @else
+            {{--
+                El enlace y el botón de eliminar son hermanos, no anidados: un
+                <form> dentro de un <a> no es HTML válido y el navegador lo
+                reordena por su cuenta (CLAUDE.md sección 5.16).
+            --}}
             <ul class="space-y-2">
                 @foreach ($planes as $plan)
-                    <li>
+                    <li class="tudi-card flex items-center gap-2 p-2" x-data="{ confirmando: false }">
                         <a href="{{ route('planes.show', $plan) }}"
-                           class="tudi-card flex items-center justify-between gap-4 p-4 text-tudi-ink no-underline hover:bg-tudi-card-inset">
+                           class="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-tudi-sm p-2 text-tudi-ink no-underline hover:bg-tudi-card-inset">
                             <span class="min-w-0">
                                 <span class="flex items-center gap-2">
                                     <span @class([
@@ -86,6 +91,24 @@
                                 @endif
                             </span>
                         </a>
+
+                        {{-- Eliminar arrastra todo el día en cascada, así que
+                             pide confirmación explícita antes de enviarse. --}}
+                        <button type="button" x-show="! confirmando" x-on:click="confirmando = true"
+                                aria-label="{{ __('Eliminar el plan del') }} {{ $plan->fecha->format('d/m/Y') }}"
+                                class="grid h-11 w-11 flex-none place-items-center rounded-full text-tudi-muted hover:bg-tudi-surface hover:text-tudi-amber-ink">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+                            </svg>
+                        </button>
+
+                        <form method="post" action="{{ route('planes.destroy', $plan) }}"
+                              x-show="confirmando" style="display: none" class="flex flex-none gap-1.5">
+                            @csrf
+                            @method('delete')
+                            <button type="submit" class="tudi-btn bg-tudi-amber text-tudi-ink">{{ __('Eliminar') }}</button>
+                            <button type="button" x-on:click="confirmando = false" class="tudi-btn tudi-btn-ghost">{{ __('No') }}</button>
+                        </form>
                     </li>
                 @endforeach
             </ul>

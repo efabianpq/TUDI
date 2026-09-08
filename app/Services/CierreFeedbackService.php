@@ -132,7 +132,7 @@ class CierreFeedbackService
      */
     private function estimar(RegistroDiario $registroDiario, array $aEstimar): array
     {
-        $objetivos = $this->distribucion->objetivosDelDia($registroDiario->usuario);
+        $objetivos = $this->distribucion->objetivosDelRegistro($registroDiario);
 
         $comidas = [];
 

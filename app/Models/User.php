@@ -36,6 +36,7 @@ use Illuminate\Notifications\Notifiable;
     'proteina_factor',
     'grasa_factor',
     'calorias_objetivo',
+    'reparto_comidas',
 ])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
@@ -73,6 +74,7 @@ class User extends Authenticatable
             'proteina_factor' => 'decimal:2',
             'grasa_factor' => 'decimal:2',
             'calorias_objetivo' => 'decimal:2',
+            'reparto_comidas' => 'array',
         ];
     }
 

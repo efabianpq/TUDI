@@ -273,7 +273,33 @@
 
         {{-- ══ Ajustes de tu objetivo ══ --}}
         <section class="space-y-3">
-            <p class="tudi-label px-1">{{ __('Ajustes de tu objetivo') }}</p>
+            <div class="flex items-center justify-between gap-3 px-1">
+                <p class="tudi-label">{{ __('Ajustes de tu objetivo') }}</p>
+
+                {{-- Mismo "¿Qué es esto?" que en el cierre (sección 5.6): sin
+                     él, esta sección lleva semanas vacía sin decir por qué. --}}
+                <div x-data="{ abierto: false }" x-on:keydown.escape.window="abierto = false">
+                    <button type="button" x-on:click="abierto = true" class="tudi-link text-[13px]">
+                        {{ __('¿Qué es esto?') }}
+                    </button>
+
+                    <div x-show="abierto" style="display: none"
+                         class="fixed inset-0 z-50 flex items-end justify-center bg-tudi-ink/60 p-4 sm:items-center"
+                         x-on:click.self="abierto = false" role="dialog" aria-modal="true">
+                        <div class="tudi-card w-full max-w-md p-6">
+                            <h2 class="text-lg font-semibold tracking-tudi-title">{{ __('Ajustes de tu objetivo') }}</h2>
+                            <div class="mt-3 space-y-3 text-sm text-tudi-ink-3">
+                                <p>{{ __('Cuando tu ritmo se sale de lo esperado, TUDI te propone subir o bajar tu objetivo calórico. La propuesta nunca se aplica sola: la confirmas o la rechazas tú.') }}</p>
+                                <p>{{ __('No mira un día suelto. Compara el promedio de los últimos 7 días con el de los 7 anteriores, así que en las primeras semanas está vacía a propósito.') }}</p>
+                                <p>{{ __('Para que aparezca hacen falta 7 días con plan y al menos un pesaje en cada una de las dos semanas. No hay que pesarse a diario: los días sin peso no cuentan como cero, simplemente no entran en el promedio.') }}</p>
+                            </div>
+                            <button type="button" x-on:click="abierto = false" class="tudi-btn tudi-btn-primary tudi-btn-block mt-5">
+                                {{ __('Entendido') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="tudi-card p-5 sm:p-6">
                 @if ($recomendacionesPendientes->isEmpty())

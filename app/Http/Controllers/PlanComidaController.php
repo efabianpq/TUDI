@@ -8,17 +8,21 @@ use App\Exceptions\NegativeCarbohydrateException;
 use App\Exceptions\NoIngredientsAvailableException;
 use App\Http\Requests\DistribucionDiaRequest;
 use App\Http\Requests\RegistroPesoRequest;
+use App\Http\Requests\RepartoComidasRequest;
 use App\Models\RegistroDiario;
 use App\Services\ActivitySuggestionService;
 use App\Services\DailyClosureService;
 use App\Services\MealDistributionService;
 use App\Services\MealPlanGeneratorService;
 use App\Services\NutritionCalculatorService;
+use App\Services\PlanDiarioService;
+use App\Services\RepartoComidasService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
+use InvalidArgumentException;
 
 /**
  * "Planes diarios" (CLAUDE.md sección 4.12): el histórico de días del usuario y
@@ -56,6 +60,8 @@ class PlanComidaController extends Controller
         private readonly MealDistributionService $distribucion,
         private readonly ActivitySuggestionService $sugerenciaActividad,
         private readonly DailyClosureService $cierre,
+        private readonly RepartoComidasService $reparto,
+        private readonly PlanDiarioService $planDiario,
     ) {}
 
     /**
@@ -110,6 +116,11 @@ class PlanComidaController extends Controller
             'actividad' => null,
             'actividades' => $registroDiario->actividadesFisicas()->latest()->get(),
             'resumenCierre' => null,
+            // Reparto vigente del día y si es el de fábrica (sección 5.14).
+            'reparto' => $this->reparto->paraElDia($registroDiario),
+            'repartoDeFabrica' => $this->reparto->deFabrica(),
+            // Por qué la sección de recomendaciones está vacía (sección 5.6).
+            'diagnosticoRecomendaciones' => null,
         ];
 
         if (! $datos['perfilCompleto']) {
@@ -119,21 +130,76 @@ class PlanComidaController extends Controller
         }
 
         try {
-            $datos['objetivos'] = $this->distribucion->objetivosDelDia($usuario);
+            $datos['objetivos'] = $this->distribucion->objetivosDelRegistro($registroDiario);
             $datos['actividad'] = $this->sugerenciaActividad->sugerir(
                 $usuario,
                 $datos['objetivos']['dia']['calorias_objetivo'],
             );
             $datos['resumenCierre'] = $this->cierre->resumen($registroDiario);
+            $datos['diagnosticoRecomendaciones'] = $this->cierre->diagnosticoRecomendaciones($registroDiario);
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
             $datos['errorPerfil'] = $e->getMessage();
 
             return view('planes.show', $datos);
         }
 
-        $datos['comidas'] = $this->comidasDelDia($registroDiario, $datos['objetivos']['por_comida']);
+        $datos['comidas'] = $this->comidasDelDia($registroDiario, $datos['objetivos']);
 
         return view('planes.show', $datos);
+    }
+
+    /**
+     * Reparto de calorías entre las tres comidas de ESTE día (sección 5.14).
+     *
+     * Cambiarlo no recalcula ningún plan ya generado —sus macros están
+     * persistidos—: redimensiona los objetivos que se muestran y el presupuesto
+     * de lo que quede por generar. Se permite sobre un día cerrado por el mismo
+     * motivo que el peso: no altera ninguna cifra del cierre.
+     */
+    public function reparto(RepartoComidasRequest $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        try {
+            $this->reparto->guardar(
+                $registroDiario,
+                (array) $request->validated('reparto'),
+                (bool) $request->validated('como_habitual', false),
+            );
+        } catch (InvalidArgumentException $e) {
+            // El servicio es la última palabra sobre qué reparto es válido y su
+            // mensaje ya es legible.
+            return Redirect::route('planes.show', $registroDiario)->with('error', $e->getMessage());
+        }
+
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'reparto-guardado');
+    }
+
+    /**
+     * "Reiniciar el día": lo vacía y lo deja como recién creado, sin las
+     * sugerencias ya generadas (sección 5.16). No recibe entrada, así que no
+     * hay Form Request que aplicar (sección 9).
+     */
+    public function resetear(Request $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        $this->planDiario->resetear($registroDiario);
+
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'plan-reiniciado');
+    }
+
+    /**
+     * Elimina el plan diario entero, con todo su día en cascada. Vuelve al
+     * listado: la pantalla desde la que se pulsó ya no existe.
+     */
+    public function destroy(Request $request, RegistroDiario $registroDiario): RedirectResponse
+    {
+        $this->autorizar($request, $registroDiario);
+
+        $this->planDiario->eliminar($registroDiario);
+
+        return Redirect::route('planes.index')->with('status', 'plan-eliminado');
     }
 
     /**
@@ -219,7 +285,11 @@ class PlanComidaController extends Controller
                 $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
             );
 
-            $this->generador->generarPlan($registroDiario, $planNutricional);
+            $this->generador->generarPlan(
+                $registroDiario,
+                $planNutricional,
+                $this->reparto->paraElDia($registroDiario),
+            );
         } catch (NoIngredientsAvailableException $e) {
             return Redirect::route('planes.show', $registroDiario)->with('error', $e->getMessage());
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
@@ -253,22 +323,26 @@ class PlanComidaController extends Controller
      * en ese orden, con su texto de ingredientes, su objetivo y su plan si ya
      * se generó.
      *
-     * @param  array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>  $objetivosPorComida
+     * Las claves siguen saliendo de DISTRIBUCION_COMIDAS —son nombres de
+     * columna—, pero el porcentaje de cada una lo dicta el reparto vigente del
+     * día (sección 5.14).
+     *
+     * @param  array{por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}  $objetivos
      * @return array<int, array<string, mixed>>
      */
-    private function comidasDelDia(RegistroDiario $registroDiario, array $objetivosPorComida): array
+    private function comidasDelDia(RegistroDiario $registroDiario, array $objetivos): array
     {
         $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
 
         $comidas = [];
 
-        foreach (MealPlanGeneratorService::DISTRIBUCION_COMIDAS as $tipoComida => $porcentaje) {
+        foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
             $plan = $planes->get($tipoComida);
 
             $comidas[] = [
                 'tipo' => $tipoComida,
-                'porcentaje' => $porcentaje,
-                'objetivos' => $objetivosPorComida[$tipoComida],
+                'porcentaje' => $objetivos['reparto'][$tipoComida],
+                'objetivos' => $objetivos['por_comida'][$tipoComida],
                 'texto' => $registroDiario->{'ingredientes_'.$tipoComida},
                 'plan' => $plan,
                 'estado' => match (true) {

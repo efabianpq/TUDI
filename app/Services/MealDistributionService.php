@@ -34,11 +34,11 @@ use InvalidArgumentException;
  *    ahora no se coman las calorías de la cena que todavía no se ha escrito.
  *
  * No reimplementa ninguna fórmula: los objetivos de calorías y macros salen de
- * NutritionCalculatorService (sección 5) y el reparto entre comidas de
- * MealPlanGeneratorService::DISTRIBUCION_COMIDAS (sección 4.2, sigue siendo el
- * único sitio donde vive el 25/40/35). Los presupuestos por comida y los
- * totales de cada plan se calculan en PHP, nunca los devuelve el modelo
- * (regla 7 de la sección 11).
+ * NutritionCalculatorService (sección 7) y cuánto le toca a cada comida lo
+ * resuelve RepartoComidasService (sección 5.14), que sabe si ese día lleva un
+ * reparto propio, el habitual del usuario o el 25/40/35 de fábrica. Los
+ * presupuestos por comida y los totales de cada plan se calculan en PHP, nunca
+ * los devuelve el modelo (regla 7 de la sección 13).
  */
 class MealDistributionService
 {
@@ -57,6 +57,7 @@ class MealDistributionService
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
         private readonly MealDistributionProviderInterface $proveedor,
+        private readonly RepartoComidasService $reparto,
     ) {}
 
     /**
@@ -74,12 +75,30 @@ class MealDistributionService
     }
 
     /**
+     * Objetivos de un día concreto: los del usuario, repartidos con el reparto
+     * vigente de ESE día (sección 5.14).
+     *
+     * Es la variante que usa todo lo que trabaja sobre un RegistroDiario; la de
+     * abajo queda para cuando solo hay usuario y todavía no hay día.
+     *
+     * @return array{dia: array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}, por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}
+     */
+    public function objetivosDelRegistro(RegistroDiario $registroDiario): array
+    {
+        return $this->objetivosDelDia(
+            $registroDiario->usuario,
+            $this->reparto->paraElDia($registroDiario),
+        );
+    }
+
+    /**
      * Objetivos del día y su reparto nominal por comida, a partir del objetivo
      * calórico vigente del usuario (users.calorias_objetivo — sección 4.10).
      *
-     * @return array{dia: array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}, por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>}
+     * @param  array<string, float>|null  $reparto  proporción por comida; null usa el reparto habitual del usuario
+     * @return array{dia: array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}, por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}
      */
-    public function objetivosDelDia(User $usuario): array
+    public function objetivosDelDia(User $usuario, ?array $reparto = null): array
     {
         $dia = $this->calculadora->calculatePlan(
             (float) $usuario->peso_kg,
@@ -91,9 +110,11 @@ class MealDistributionService
             $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
         );
 
+        $reparto ??= $this->reparto->habitual($usuario);
+
         $porComida = [];
 
-        foreach (MealPlanGeneratorService::DISTRIBUCION_COMIDAS as $tipoComida => $porcentaje) {
+        foreach ($reparto as $tipoComida => $porcentaje) {
             $porComida[$tipoComida] = [
                 'calorias' => $dia['calorias_objetivo'] * $porcentaje,
                 'proteina_g' => $dia['proteina_g'] * $porcentaje,
@@ -102,7 +123,7 @@ class MealDistributionService
             ];
         }
 
-        return ['dia' => $dia, 'por_comida' => $porComida];
+        return ['dia' => $dia, 'por_comida' => $porComida, 'reparto' => $reparto];
     }
 
     /**
@@ -141,7 +162,7 @@ class MealDistributionService
         }
 
         $presupuestos = $this->presupuestos(
-            $this->objetivosDelDia($registroDiario->usuario),
+            $this->objetivosDelRegistro($registroDiario),
             $estado,
         );
 
@@ -225,7 +246,7 @@ class MealDistributionService
      * después de descontar lo ya fijado y lo reservado para las comidas que el
      * usuario todavía no ha escrito.
      *
-     * @param  array{dia: array<string, float>, por_comida: array<string, array<string, float>>}  $objetivos
+     * @param  array{dia: array<string, float>, por_comida: array<string, array<string, float>>, reparto: array<string, float>}  $objetivos
      * @param  array{planes: array<string, PlanComida|null>, fijas: array<string, array<string, mixed>>, a_generar: array<string, string>, reservadas: array<int, string>}  $estado
      * @return array{comidas: array<string, array{texto: string, objetivos: array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}}>, contexto_dia: array<string, mixed>}
      */
@@ -257,10 +278,13 @@ class MealDistributionService
         }
 
         // Se reparte proporcionalmente al peso que cada comida a generar tiene
-        // dentro del reparto 25/40/35, no a partes iguales: el almuerzo pesa
-        // más que el desayuno y debe seguir pesando más sobre lo que queda.
+        // dentro del reparto vigente del día (sección 5.14), no a partes
+        // iguales: si el almuerzo pesa más que el desayuno, debe seguir pesando
+        // más sobre lo que queda.
+        $reparto = $objetivos['reparto'];
+
         $pesoTotal = array_sum(array_map(
-            fn (string $tipoComida): float => MealPlanGeneratorService::DISTRIBUCION_COMIDAS[$tipoComida],
+            fn (string $tipoComida): float => $reparto[$tipoComida],
             array_keys($estado['a_generar']),
         ));
 
@@ -268,7 +292,7 @@ class MealDistributionService
 
         foreach ($estado['a_generar'] as $tipoComida => $texto) {
             $participacion = $pesoTotal > 0
-                ? MealPlanGeneratorService::DISTRIBUCION_COMIDAS[$tipoComida] / $pesoTotal
+                ? $reparto[$tipoComida] / $pesoTotal
                 : 0.0;
 
             $comidas[$tipoComida] = [
@@ -287,7 +311,7 @@ class MealDistributionService
                 'proteina_objetivo_dia_g' => $totalDia['proteina_g'],
                 'grasa_objetivo_dia_g' => $totalDia['grasa_g'],
                 'carbohidratos_objetivo_dia_g' => $totalDia['carbohidratos_g'],
-                'reparto' => MealPlanGeneratorService::DISTRIBUCION_COMIDAS,
+                'reparto' => $reparto,
                 'comidas_fijas' => $estado['fijas'],
                 'comidas_reservadas' => $reservadas,
             ],
