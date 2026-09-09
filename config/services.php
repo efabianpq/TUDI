@@ -85,6 +85,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Qué proveedor de IA está detrás de cada interfaz
+    |--------------------------------------------------------------------------
+    |
+    | CLAUDE.md sección 4.12. `AppServiceProvider` lee esto para decidir qué
+    | clase concreta entrega detrás de MealDistributionProviderInterface y de
+    | TranscripcionAudioProviderInterface, sin volver a desplegar código: cambiar
+    | de proveedor durante el piloto (para comparar OpenAI contra Gemini) es
+    | cambiar esta variable en `.env` de producción y correr
+    | `php artisan config:cache`.
+    |
+    | Valores válidos: "openai" (por defecto) o "gemini". "claude" queda fuera
+    | a propósito: ClaudeMealDistributionProvider no tiene proveedor de
+    | transcripción equivalente, y el piloto solo compara los dos que sí cubren
+    | las dos interfaces.
+    |
+    */
+
+    'ai_provider' => [
+        'distribucion' => env('AI_PROVEEDOR_DISTRIBUCION', 'openai'),
+        'transcripcion' => env('AI_PROVEEDOR_TRANSCRIPCION', 'openai'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | OpenAI (ChatGPT) — motor vigente de distribución de comidas y transcripción
     |--------------------------------------------------------------------------
     |

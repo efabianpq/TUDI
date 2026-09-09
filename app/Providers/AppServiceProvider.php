@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\AI\GeminiMealDistributionProvider;
+use App\Services\AI\GeminiTranscripcionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\NutritionAiProviderInterface;
 use App\Services\AI\OpenAiMealDistributionProvider;
@@ -11,6 +13,7 @@ use App\Services\AI\PremiumGatedTranscripcionProvider;
 use App\Services\AI\RuleBasedNutritionProvider;
 use App\Services\AI\TranscripcionAudioProviderInterface;
 use Illuminate\Contracts\Auth\Factory as Auth;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\ServiceProvider;
 
@@ -28,36 +31,59 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(NutritionAiProviderInterface::class, RuleBasedNutritionProvider::class);
 
         // Motor de "Generar distribución" (CLAUDE.md sección 4.12): interpreta
-        // el texto libre de ingredientes de cada comida. Mismo criterio que
-        // arriba — cambiar de proveedor es cambiar esta línea. OpenAI (ChatGPT)
-        // reemplazó a Gemini como proveedor vigente por precisión de las
-        // estimaciones; Gemini y Claude siguen en el repo, sin bindear.
-        // El proveedor vigente va envuelto en el control de acceso por plan
-        // (CLAUDE.md sección 5.18): la interfaz es el único camino hacia el
+        // el texto libre de ingredientes de cada comida. OpenAI (ChatGPT) es el
+        // proveedor por defecto por precisión de las estimaciones; Gemini queda
+        // disponible detrás de AI_PROVEEDOR_DISTRIBUCION para comparar los dos
+        // durante el piloto sin desplegar código (config('services.ai_provider')
+        // arriba). El proveedor vigente va envuelto en el control de acceso por
+        // plan (CLAUDE.md sección 5.18): la interfaz es el único camino hacia el
         // proveedor, así que envolverla cubre de una vez la distribución de
         // comidas y la estimación de consumo real, sin un solo `if` en los
-        // controladores. Para cambiar de proveedor se cambia la clase de dentro,
-        // no el envoltorio.
+        // controladores.
         $this->app->bind(
             MealDistributionProviderInterface::class,
             fn ($app) => new PremiumGatedMealDistributionProvider(
-                $app->make(OpenAiMealDistributionProvider::class),
+                $this->motorDeDistribucion($app),
                 $app->make(Auth::class),
             ),
         );
 
         // Dictado por voz cuando la Web Speech API del navegador no funciona
-        // (Safari de iOS — CLAUDE.md sección 4.21). Mismo criterio: cambiar de
-        // proveedor de transcripción es cambiar la clase de dentro. El
-        // envoltorio gatea solo este camino de servidor, que es el que se
+        // (Safari de iOS — CLAUDE.md sección 4.21). Mismo criterio de arriba:
+        // el envoltorio gatea solo este camino de servidor, que es el que se
         // factura; dictar con el navegador sigue siendo gratis (sección 5.9).
         $this->app->bind(
             TranscripcionAudioProviderInterface::class,
             fn ($app) => new PremiumGatedTranscripcionProvider(
-                $app->make(OpenAiTranscripcionProvider::class),
+                $this->motorDeTranscripcion($app),
                 $app->make(Auth::class),
             ),
         );
+    }
+
+    /**
+     * Qué implementación concreta hay detrás de MealDistributionProviderInterface,
+     * según AI_PROVEEDOR_DISTRIBUCION. Cualquier valor que no sea "gemini" cae al
+     * proveedor por defecto en vez de fallar: un valor mal escrito en `.env` de
+     * producción no debe tumbar la generación de planes.
+     */
+    private function motorDeDistribucion(Container $app): MealDistributionProviderInterface
+    {
+        return match (config('services.ai_provider.distribucion')) {
+            'gemini' => $app->make(GeminiMealDistributionProvider::class),
+            default => $app->make(OpenAiMealDistributionProvider::class),
+        };
+    }
+
+    /**
+     * Misma idea que `motorDeDistribucion()`, para TranscripcionAudioProviderInterface.
+     */
+    private function motorDeTranscripcion(Container $app): TranscripcionAudioProviderInterface
+    {
+        return match (config('services.ai_provider.transcripcion')) {
+            'gemini' => $app->make(GeminiTranscripcionProvider::class),
+            default => $app->make(OpenAiTranscripcionProvider::class),
+        };
     }
 
     /**
