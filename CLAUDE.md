@@ -15,7 +15,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 - **Frontend:** Blade (server-rendered), mobile-first, con el sistema visual TUDI (sección 5.12) + Alpine.js (vía Breeze) + Chart.js para el gráfico del dashboard. Sin SPA. Chart.js se carga desde CDN (`cdn.jsdelivr.net`), no está en `package.json`; el CSS/JS propio (Tailwind + Alpine, vía Vite) sí requiere build. El hosting no tiene Node/npm: `public/build/` se compila en local con `npm run build` y **se commitea al repo**. Correr `npm run build` antes de cada commit que toque `resources/css`, `resources/js` o `tailwind.config.js`.
 - **Base de datos:** MySQL 8.x / MariaDB 10.6+. Versión mínima asumida: MySQL 5.7 / MariaDB 10.1 (ninguna consulta usa funciones de ventana ni CTEs — sección 5.7 explica por qué). Tests sobre SQLite en memoria.
 - **Sesiones:** `SESSION_DRIVER=database`. **Nunca `file` en producción**: ese driver serializa las peticiones de una misma sesión y, con llamadas a la IA de varios segundos, dos pestañas bastan para provocar un 504 (sección 5.13).
-- **Tareas programadas:** Laravel Task Scheduling vía un único cron de Hostinger (`schedule:run`). Sin Redis ni colas externas: la cola de correos usa el driver `database` y se vacía con `queue:work --stop-when-empty` desde ese mismo cron.
+- **Tareas programadas:** Laravel Task Scheduling vía un único cron de Hostinger (`schedule:run`). Sin Redis ni colas externas: la cola de correos usa el driver `database` y se vacía cada minuto desde ese mismo cron con `queue:work --stop-when-empty --max-time=50 --tries=3` (termina en cuanto no hay trabajo, y `--max-time=50` evita solaparse con la ejecución del minuto siguiente aunque falle `withoutOverlapping()`).
 - **Timezone:** `America/Bogota` (GMT-5) por defecto — de ahí depende dónde cae la medianoche que decide "hoy" en todo el dominio. La suite de tests corre en la misma zona.
 - **Instalable como app:** manifest + metas de Apple + iconos del isotipo (sección 5.12). Sin service worker ni funcionamiento offline.
 - **Almacenamiento de imágenes:** disco local vía `Storage` facade (`storage/app/public`, con `storage:link`). Nunca rutas hardcodeadas.
@@ -68,7 +68,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 - **`recomendaciones_sistema`**: `estado` enum(pendiente,confirmada,rechazada) default `pendiente` — nunca se aplica un ajuste sin confirmación (sección 8).
 - **`parametros_maestros`**: `clave` única, `valor` (texto), `actualizado_por` — solo guarda lo que el administrador cambió; una clave ausente significa "el valor de fábrica".
 - **`recursos_didacticos`**: `clave` única, `tipo` (url|archivo), `valor`, `nombre_original`, `actualizado_por` — misma forma que la anterior pero para contenido, no umbrales (sección 5.15).
-- **`onDelete`: cascade en todas las FKs** — no hay catálogo compartido en el modelo de datos.
+- **`onDelete`: cascade en todas las FKs de dominio** — no hay catálogo compartido en el modelo de datos. Excepción deliberada: `parametros_maestros.actualizado_por` y `recursos_didacticos.actualizado_por` usan `nullOnDelete()` — borrar al administrador que tocó un umbral o publicó un recurso no debe llevarse por delante el valor o el archivo.
 
 `ComidaReal` es una entidad separada de `PlanComida` a propósito: preserva el historial "planificado vs. ejecutado". No cambiar este diseño sin discutirlo.
 
