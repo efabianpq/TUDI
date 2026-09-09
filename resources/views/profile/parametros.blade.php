@@ -118,10 +118,7 @@
 
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between gap-3">
-            <h1 class="text-lg font-semibold tracking-tudi-title sm:text-2xl">{{ __('Calculadora') }}</h1>
-            <x-tudi.avatar-menu />
-        </div>
+        <h1 class="text-lg font-semibold tracking-tudi-title sm:text-2xl">{{ __('Calculadora') }}</h1>
     </x-slot>
 
     <x-tudi.flash :mensajes="['parametros-updated' => __('Guardado.')]" />
@@ -132,21 +129,12 @@
         cifra persistida. Quien calcula y guarda `users.calorias_objetivo` es
         siempre NutritionCalculatorService en el servidor, al pulsar el botón.
     --}}
-    {{--
-        Con material de apoyo publicado la Calculadora se ensancha y el video
-        va al lado del objetivo en escritorio (CLAUDE.md sección 5.15); sin él,
-        la pantalla es exactamente la de siempre. Los controles se quedan en
-        max-w-2xl en los dos casos: ensancharlos no los haría más legibles.
-    --}}
-    <form method="post" action="{{ route('calculadora.update') }}"
-          class="mx-auto space-y-5 {{ $hayMaterial ? 'max-w-5xl' : 'max-w-2xl' }}"
+    <form method="post" action="{{ route('calculadora.update') }}" class="mx-auto max-w-2xl space-y-5"
           x-data="calculadoraDeficit(@js($inicial))"
           x-on:input="tocado = true"
           x-on:change="tocado = true">
         @csrf
         @method('put')
-
-        <div class="grid gap-5 {{ $hayMaterial ? 'lg:grid-cols-2 lg:items-start' : '' }}">
 
         {{-- ── El resultado, arriba ── --}}
         <div class="tudi-panel on-dark">
@@ -187,40 +175,68 @@
             <p class="tudi-meta mt-3" x-show="tocado || vigente === null" style="display: none">
                 {{ __('Vista previa · guarda para aplicarlo') }}
             </p>
+
+            {{--
+                ── Ayuda para el usuario (CLAUDE.md sección 5.15) ──
+                Dos botones y nada más. La versión anterior incrustaba el video
+                en una tarjeta propia que ensanchaba la pantalla y desplazaba
+                los controles: el material es una ayuda, no puede reordenar la
+                Calculadora. El video se abre en una capa sobre la página, así
+                que verlo no hace perder lo que se estaba ajustando.
+            --}}
+            @if ($hayMaterial)
+                <div class="mt-4 flex flex-wrap gap-2 border-t border-tudi-dark-3 pt-4"
+                     x-data="{ video: false }" x-on:keydown.escape.window="video = false">
+                    @if ($videoIncrustado)
+                        <button type="button" x-on:click="video = true"
+                                class="tudi-btn gap-2 bg-tudi-dark-3 text-tudi-on-dark">
+                            <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 8.5v7l6-3.5-6-3.5ZM4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z" />
+                            </svg>
+                            {{ __('Ver el video') }}
+                        </button>
+
+                        <div x-show="video" style="display: none"
+                             class="fixed inset-0 z-50 flex items-center justify-center bg-tudi-ink/80 p-4"
+                             x-on:click.self="video = false" role="dialog" aria-modal="true">
+                            <div class="w-full max-w-2xl">
+                                <div class="aspect-video w-full overflow-hidden rounded-tudi-md bg-tudi-dark">
+                                    {{-- x-if, no x-show: sin esto el iframe se
+                                         carga (y YouTube empieza a contar) en
+                                         cuanto abre la Calculadora. --}}
+                                    <template x-if="video">
+                                        <iframe src="{{ $videoIncrustado }}"
+                                                title="{{ __('Video explicativo de la Calculadora Déficit') }}"
+                                                class="h-full w-full"
+                                                referrerpolicy="strict-origin-when-cross-origin"
+                                                allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                                                allowfullscreen></iframe>
+                                    </template>
+                                </div>
+                                <button type="button" x-on:click="video = false"
+                                        class="tudi-btn tudi-btn-lime tudi-btn-block mt-3">
+                                    {{ __('Cerrar') }}
+                                </button>
+                            </div>
+                        </div>
+                    @endif
+
+                    @if ($guiaPdf)
+                        {{-- target y rel: en móvil, "download" sobre un PDF
+                             servido desde otro origen no siempre descarga, y
+                             abrirlo en una pestaña siempre funciona. --}}
+                        <a href="{{ $guiaPdf['url'] }}" download target="_blank" rel="noopener"
+                           class="tudi-btn gap-2 bg-tudi-dark-3 text-tudi-on-dark no-underline">
+                            <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" />
+                            </svg>
+                            {{ __('Guía en PDF') }}
+                        </a>
+                    @endif
+                </div>
+            @endif
         </div>
 
-        {{-- ── Material de apoyo, si el administrador publicó alguno ── --}}
-        @if ($hayMaterial)
-            <div class="tudi-card space-y-4 p-5">
-                <p class="tudi-label">{{ __('Cómo funciona tu objetivo') }}</p>
-
-                @if ($videoIncrustado)
-                    {{-- aspect-video: el iframe se adapta al ancho de la
-                         columna sin recortarse en móvil. --}}
-                    <div class="aspect-video w-full overflow-hidden rounded-tudi-sm bg-tudi-dark">
-                        <iframe src="{{ $videoIncrustado }}"
-                                title="{{ __('Video explicativo de la Calculadora Déficit') }}"
-                                class="h-full w-full"
-                                loading="lazy"
-                                referrerpolicy="strict-origin-when-cross-origin"
-                                allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                                allowfullscreen></iframe>
-                    </div>
-                @endif
-
-                @if ($guiaPdf)
-                    <a href="{{ $guiaPdf['url'] }}" download
-                       class="tudi-btn tudi-btn-secondary tudi-btn-block gap-2.5 no-underline">
-                        <svg class="h-5 w-5 flex-none" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" />
-                        </svg>
-                        {{ __('Descargar la guía en PDF') }}
-                    </a>
-                @endif
-            </div>
-        @endif
-
-        </div>
 
         {{-- ── Los controles ── --}}
         <div class="tudi-card mx-auto w-full max-w-2xl space-y-6 p-5">

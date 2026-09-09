@@ -6,10 +6,17 @@ use App\Services\AI\TranscripcionAudioProviderInterface;
 use Illuminate\Http\UploadedFile;
 
 /**
- * Dictado por voz con transcripción en el servidor (CLAUDE.md sección 4.21):
- * el plan B para Safari de iOS, donde la Web Speech API pide el micrófono y
- * nunca emite un resultado.
+ * Plan B del dictado por voz (CLAUDE.md sección 5.9): grabar y transcribir en
+ * el servidor.
+ *
+ * Está apagado por defecto porque cada llamada se factura al proveedor, así que
+ * casi todos estos tests lo encienden a mano: comprueban que el endpoint sigue
+ * siendo correcto para el despliegue que decida pagarlo. El último comprueba lo
+ * contrario — que apagado no transcribe nada.
  */
+beforeEach(function () {
+    config(['services.transcripcion.fallback_servidor' => true]);
+});
 
 /**
  * Un WAV mínimo pero válido: la validación `mimetypes` mira el contenido real
@@ -69,4 +76,19 @@ it('rechaza un archivo que no es audio', function () {
         ->postJson(route('transcribir'), ['audio' => UploadedFile::fake()->image('foto.jpg')])
         ->assertStatus(422)
         ->assertJsonValidationErrors('audio');
+});
+
+it('no transcribe nada cuando el plan B del servidor está apagado', function () {
+    // Es el estado por defecto: el reconocimiento nativo del navegador no
+    // cuesta nada y este endpoint sí, así que apagado ni siquiera llama al
+    // proveedor (CLAUDE.md sección 5.9).
+    config(['services.transcripcion.fallback_servidor' => false]);
+
+    $this->mock(TranscripcionAudioProviderInterface::class)
+        ->shouldNotReceive('transcribir');
+
+    $this->actingAs(User::factory()->create())
+        ->post(route('transcribir'), ['audio' => audioDePrueba()])
+        ->assertStatus(422)
+        ->assertJsonPath('error', 'El dictado por voz lo resuelve tu navegador. Si el micrófono no funciona aquí, escríbelo a mano.');
 });

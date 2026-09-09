@@ -40,11 +40,12 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Motor de recomendaciones | `app/Services/RulesEngineService.php`, `app/Http/Controllers/RecomendacionSistemaController.php` |
 | Analítica de tendencias | `app/Services/TrendAnalyticsService.php`, `app/Services/SeguimientoService.php`, `app/Console/Commands/CalculateTrends.php` (`dailyAt('00:30')`) |
 | Inicio (dashboard) | `app/Http/Controllers/DashboardController.php` |
-| Dictado por voz | `app/Services/AI/TranscripcionAudioProviderInterface.php` + `GeminiTranscripcionProvider.php`, `app/Http/Controllers/TranscripcionController.php` |
+| Dictado por voz | `resources/js/tudi/dictado.js` (reconocimiento nativo, camino normal); plan B apagado por defecto: `app/Services/AI/TranscripcionAudioProviderInterface.php` + `GeminiTranscripcionProvider.php`, `app/Http/Controllers/TranscripcionController.php` |
 | Consola de administración | `app/Http/Controllers/Admin/UsuarioController.php` + `ParametroMaestroController.php` + `RecursoDidacticoController.php`, `app/Http/Middleware/EnsureEsAdministrador.php` |
 | Parámetros maestros | `app/Services/ParametrosMaestrosService.php`, `app/Models/ParametroMaestro.php` |
 | Material de apoyo (video, PDF) | `app/Services/RecursosDidacticosService.php`, `app/Models/RecursoDidactico.php` |
 | Diagnóstico y administración de despliegue | `app/Console/Commands/Diagnostico.php` (`tudi:diagnostico`), `app/Console/Commands/HacerAdministrador.php` (`tudi:hacer-admin`) |
+| Datos de demostración | `database/seeders/DemoSeeder.php`, `app/Console/Commands/SembrarDemo.php` (`tudi:demo`), guion en `PRESENTACION.md` |
 
 **Regla no negociable:** los controladores son delgados (reciben, validan con Form Requests, delegan). Toda la lógica de negocio vive en `app/Services`. Nada de lógica de negocio en modelos Eloquent ni en controladores.
 
@@ -86,7 +87,7 @@ Cualquiera puede registrarse (`RegisteredUserController` → `CuentaService::reg
 Primer paso del flujo, dimensiona todo lo demás. `ProfileParametersController` (rutas `calculadora.edit`/`calculadora.update`; la clase conserva su nombre de la época en que la ruta se llamaba `/profile/parametros`).
 
 - **Orientada a objetivo, no a factores.** Pregunta sexo, peso, estatura, edad, **"¿qué tan activo eres?"** (cuatro escalones con explicación visible bajo el control — excepción documentada a la regla 8 de la sección 13) y **"tu objetivo"** (Mantener/−10%/−20%/−30%, también explicado). Proteína y grasa se **derivan** del objetivo elegido (cuanto más agresivo el déficit, más proteína) y quedan en "Ajustes avanzados", editables a mano si se necesita.
-- **Material de apoyo** (sección 5.15): si el administrador publicó video o guía en PDF, aparecen en una tarjeta al lado de "Tu objetivo diario" (debajo en móvil) y la pantalla se ensancha a `max-w-5xl`. Sin nada publicado, la Calculadora se ve exactamente igual que sin la funcionalidad.
+- **Material de apoyo** (sección 5.15): si el administrador publicó video o guía en PDF, aparecen como **dos botones** al pie del panel "Tu objetivo diario" — el video se abre en una capa sobre la página (con `x-if`, para no cargar el iframe hasta que se pulsa), el PDF se descarga. Son una ayuda, no reordenan la pantalla: el ancho de la Calculadora no cambia. Sin nada publicado, se ve exactamente igual que sin la funcionalidad.
 - El resultado se muestra **arriba** del formulario, recalculado en vivo por un espejo en JS de la fórmula de la sección 7 (`calculadoraDeficit()` en la vista) — la cifra que se persiste la calcula siempre `NutritionCalculatorService` en el servidor, al guardar.
 - `ProfileParametersController@update` calcula y persiste `users.calorias_objetivo`, que es **el objetivo calórico vigente**: lo consumen `MealDistributionService` y `DailyClosureService` en vez de recalcular desde la fórmula cruda, y solo lo mueve `RulesEngineService::confirmar()` (sección 5.6) o una edición explícita de parámetros. Si el cálculo lanza `NegativeCarbohydrateException`/`InvalidNutritionParameterException` no se persiste nada.
 - Se ve en toda la plataforma junto al nombre del usuario en la navegación.
@@ -161,12 +162,12 @@ Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan,
 
 ### 5.9 Dictado por voz
 
-Dos caminos, en este orden:
+**Reconocimiento nativo del navegador, sin coste.** El único camino normal es la Web Speech API: quien reconoce la voz es el sistema operativo (Windows, Android, macOS e iOS lo traen), el audio no sale del dispositivo y no cuesta ninguna llamada al proveedor.
 
-1. **Web Speech API del navegador** (preferente): el audio no sale del dispositivo, sin coste de proveedor. **En iOS se salta directo al camino 2** (Safari no emite resultados de forma fiable).
-2. **Grabar y transcribir en el servidor:** `MediaRecorder` graba, `POST /transcribir` (único endpoint JSON del proyecto, `throttle:30,1`) transcribe con `GeminiTranscripcionProvider` (`temperature = 0.0`, prompt de transcripción literal, marcador `SIN_VOZ`). Un fallo sale como 422 con mensaje, nunca 500.
+- **iOS entra por el mismo camino.** Safari soporta `webkitSpeechRecognition` pero ignora `continuous = true`: corta la sesión sola en cada pausa. La solución nativa es reconocer **por tramos y reengancharlos** (`continuous = false` + arrancar otra sesión en `end` mientras el usuario no pulse "Listo"), acumulando el texto definitivo entre tramos. `TRAMOS_MUDOS_MAXIMOS` evita reenganchar para siempre con un micrófono callado.
+- **El plan B —grabar y transcribir en el servidor— está apagado por defecto.** `POST /transcribir` (único endpoint JSON, `throttle:30,1`, `GeminiTranscripcionProvider`) sigue implementado y probado, pero solo responde con `TRANSCRIPCION_FALLBACK_SERVIDOR=true`: cada dictado sería una llamada facturable y ocuparía un worker de PHP-FPM (sección 5.13). Apagado, el layout ni siquiera emite la meta `ruta-transcribir`, así que el JS no tiene a dónde mandar audio.
 
-Si el navegador no puede con ninguno de los dos, el botón del micrófono queda oculto y se escribe a mano. Cubre los textareas de ingredientes y el texto del feedback de cierre, con un popup de grabación (tiempo, transcripción en vivo, "Listo"/"Cancelar").
+Si el navegador no puede reconocer voz y el plan B está apagado, el botón del micrófono queda oculto y se escribe a mano. Cubre los textareas de ingredientes y el texto del feedback de cierre, con un popup de grabación (tiempo, transcripción en vivo, "Listo"/"Cancelar").
 
 ### 5.10 Consola de administración (`/admin`)
 
@@ -186,7 +187,7 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 ### 5.12 Identidad visual, mobile-first y shell instalable
 
 - **`resources/css/tudi-tokens.css`** es la única fuente de verdad de color, tipografía, radio y espaciado; se importa antes de las directivas de Tailwind. `tailwind.config.js` refleja los mismos valores — si un token cambia, se cambia en el CSS y se copia allí, nunca al revés. Fondo crema siempre, un panel carbón por pantalla con la cifra protagonista, **lima solo para progreso** (sobre crema el primario es carbón), ámbar para avisos (no hay rojo en la paleta).
-- **Navegación:** barra lateral de 232px en escritorio, barra inferior fija de tres destinos (Inicio/Calculadora/Planes) en móvil, `aria-current="page"` en el activo. Objetivos táctiles de 44px mínimo. Componentes compartidos (`x-text-input`, `x-primary-button`) fijan 48px de alto y 16px de tipografía (evita el zoom automático de Safari).
+- **Navegación:** barra lateral de 232px en escritorio; en móvil, **dos barras fijas** — la superior (`x-tudi.barra-superior`: marca, fecha y menú de la cuenta) y la inferior de tres destinos (Inicio/Calculadora/Planes), con `aria-current="page"` en el activo. Las dos viven en el layout, no en cada vista: antes cada pantalla montaba su cabecera y solo algunas incluían el menú del avatar, así que desde el plan diario no había forma de llegar a "Mi cuenta" ni de cerrar sesión. En escritorio la barra superior se oculta porque la lateral ya trae marca, tarjeta de usuario y logout. Objetivos táctiles de 44px mínimo. Componentes compartidos (`x-text-input`, `x-primary-button`) fijan 48px de alto y 16px de tipografía (evita el zoom automático de Safari).
 - **Safe area, arriba y abajo.** Con `viewport-fit=cover` + `apple-mobile-web-app-status-bar-style: black-translucent`, instalada como app en iOS la página empieza **debajo del reloj y la señal**. `main` descuenta `env(safe-area-inset-top)` en móvil (`pt-[calc(env(safe-area-inset-top)+1.25rem)]`, `sm:pt-8`) y el layout de invitado hace lo mismo arriba y abajo; sin eso, la cabecera —y con ella el menú de la cuenta— quedaba solapada con la barra del sistema y no se podía pulsar. En el navegador, sin instalar, el inset es cero y el espaciado es el de siempre.
 - **Macros: palabra completa donde cabe, icono donde no.** En los paneles carbón (Objetivo del día, Tu objetivo diario) van "Proteína / Grasas / Carbohidratos" enteros. En los chips compactos sobre crema va el icono ilustrado del branding (`public/icons/macros/*.png`, generados de `resources/branding/`), vía `<x-tudi.macro tipo valor variante>`. Nunca la inicial suelta: "P/G/C" no dice nada a quien empieza. El arte trae su propio fondo crema, así que se recorta en círculo y no se usa sobre oscuro.
 - **Acordeón de comidas** en el plan diario: `<details>` nativos con un solo abierto a la vez (listener en captura, `toggle` no burbujea).
@@ -231,6 +232,15 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada de la base de datos se lleva las filas, pero no los archivos del disco.
 
 **Por qué el reset también borra el peso:** "volver a empezar" incluye el peso, y dejarlo suelto en un día del que no queda nada sería un dato huérfano. No rompe la ventana de 7 días — el promedio móvil ignora los días sin peso en vez de contarlos como cero (sección 5.7) y el índice de consistencia mide días cerrados, no pesajes. El seguimiento no depende solo del peso: nadie se pesa a diario.
+
+### 5.17 Datos de demostración (`tudi:demo`)
+
+`DemoSeeder` + `php artisan tudi:demo` siembran seis cuentas, cada una parada en un punto distinto del recorrido, para poder enseñar la plataforma sin esperar tres semanas a que alguien acumule historial. Guion de la demostración y material de publicidad en `PRESENTACION.md`.
+
+- **El historial no se inventa:** se crean los `PlanComida`/`ComidaReal`/`ActividadFisica` de cada día y se llama a `DailyClosureService::cerrar()`, así que el déficit y las recomendaciones salen de la lógica de dominio. **No llama al proveedor de IA**: los planes se escriben desde un catálogo de comidas de ejemplo (sembrar 21 días × 6 cuentas costaría cientos de llamadas facturables).
+- **Escenarios cubiertos:** administradora, cuenta pendiente con código, cuenta activa sin Calculadora, y tres perfiles con 21 días de historial cuya pendiente de peso los sitúa en ritmo correcto (sin recomendación), demasiado lento (propone reducir) y demasiado rápido (propone aumentar). El día de hoy queda **abierto y a medias** a propósito.
+- **Idempotente y acotado:** cada cuenta se busca por correo y su historial se rehace; `--limpiar` borra solo las cuentas cuyo correo termina en `@demo.tudeficitinteligente.online`, así que es seguro correrlo sobre producción. Cubierto por `tests/Feature/DemoSeederTest.php`, que fija el escenario de cada cuenta: si "baja-lento" dejara de generar su recomendación, la demo enseñaría una pantalla vacía.
+- Las cuentas usan una contraseña conocida y una es administradora: **retirarlas al terminar**.
 
 ## 6. Rutas y código sin usar, conservados a propósito
 
@@ -319,7 +329,7 @@ Cubierto por `tests/Unit/NutritionCalculatorServiceTest.php`.
 
 - Un solo cron job (`schedule:run` cada minuto); toda la automatización diaria vive en `routes/console.php`.
 - El promedio móvil se calcula en PHP (sección 5.7) — no depende de la versión de MySQL del hosting.
-- Variables sensibles solo en `.env`. `GEMINI_API_KEY` es opcional (desactiva distribución/dictado con mensaje, no 500); `MAIL_*` hace falta para que salgan los correos del alta (sin SMTP, la única vía es la consola).
+- Variables sensibles solo en `.env`. `GEMINI_API_KEY` es opcional (sin ella se desactiva la distribución de comidas con un mensaje, no un 500; el dictado por voz **no** depende de ella desde la sección 5.9); `MAIL_*` hace falta para que salgan los correos del alta (sin SMTP, la única vía es la consola).
 - **Estructura del proyecto en producción: Opción A** (proyecto fuera de `public_html`, con enlaces simbólicos hacia `public/`) — `DEPLOY.md` secciones 2 y 7 detallan el paso de sincronización obligatorio tras cada `git pull`.
 - Primer despliegue: `migrate --force`, `tudi:hacer-admin {email}`, `tudi:diagnostico` para verificar.
 - Modelos con `#[Fillable([...])]` explícito; rutas con route-model-binding verifican propiedad con `abort_unless(...usuario_id === $request->user()->id, 403)`; CSRF en todos los formularios.
@@ -338,3 +348,4 @@ Cubierto por `tests/Unit/NutritionCalculatorServiceTest.php`.
 10. **Nada que espere a un servicio externo dentro de una petición web sin timeout acotado** (sección 5.13): cada petición en curso ocupa un proceso entero de PHP-FPM. Si algo puede tardar, se acota por debajo del timeout del gateway o se manda a la cola.
 11. **Toda acción que dependa del proveedor de IA declara `data-cargando`** (sección 5.12): sin señal visible, el usuario vuelve a pulsar y gasta otra llamada.
 12. **En Hostinger, un archivo nuevo en `public/` no llega solo a producción** (sección 5.12/`DEPLOY.md` §7): si una tarea añade algo a `public/`, recuerda el paso de sincronización en el checklist de despliegue.
+13. **El dictado por voz no puede volver a depender del proveedor de IA** (sección 5.9): lo resuelve el reconocedor nativo del navegador. Cualquier camino que mande audio al servidor va detrás de `TRANSCRIPCION_FALLBACK_SERVIDOR`, apagado por defecto — si no, cada dictado se factura y ocupa un worker de PHP-FPM.

@@ -16,7 +16,6 @@
                 </a>
                 <h1 class="truncate text-lg font-semibold tracking-tudi-title sm:text-2xl">{{ __('Material de apoyo') }}</h1>
             </div>
-            <x-tudi.avatar-menu />
         </div>
     </x-slot>
 

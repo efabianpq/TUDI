@@ -153,15 +153,19 @@ it('la calculadora enseña el video y la guía cuando están publicados', functi
 
     $this->actingAs(usuarioConCalculadora())->get(route('calculadora.edit'))
         ->assertOk()
-        ->assertSee('Cómo funciona tu objetivo')
+        // Dos botones dentro del panel del objetivo, no una tarjeta que
+        // reordene la pantalla (CLAUDE.md sección 5.15).
+        ->assertSee('Ver el video')
+        ->assertSee('Guía en PDF')
         ->assertSee('youtube-nocookie.com/embed/dQw4w9WgXcQ', escape: false)
-        ->assertSee('Descargar la guía en PDF');
+        // El ancho de la Calculadora no cambia por publicar material.
+        ->assertSee('mx-auto max-w-2xl space-y-5', escape: false);
 });
 
 it('la calculadora se ve igual que siempre si no hay nada publicado', function () {
     $this->actingAs(usuarioConCalculadora())->get(route('calculadora.edit'))
         ->assertOk()
         ->assertSee('Tu objetivo diario')
-        ->assertDontSee('Cómo funciona tu objetivo')
-        ->assertDontSee('Descargar la guía en PDF');
+        ->assertDontSee('Ver el video')
+        ->assertDontSee('Guía en PDF');
 });

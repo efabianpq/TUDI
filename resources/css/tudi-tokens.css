@@ -237,3 +237,9 @@ a:hover { color: var(--tudi-lime-700); }
   font-size: 11px; color: var(--tudi-muted); text-decoration: none;
 }
 .tudi-tabbar a[aria-current="page"] { color: var(--tudi-ink); font-weight: 600; }
+
+/* Barra superior fija de móvil: el espejo de .tudi-tabbar (sección 5.12). */
+.tudi-topbar {
+  background: var(--tudi-bg);
+  border-bottom: 1px solid var(--tudi-surface);
+}

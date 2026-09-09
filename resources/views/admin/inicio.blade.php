@@ -3,7 +3,6 @@
     <x-slot name="header">
         <div class="flex items-center justify-between gap-3">
             <h1 class="text-lg font-semibold tracking-tudi-title sm:text-2xl">{{ __('Administración') }}</h1>
-            <x-tudi.avatar-menu />
         </div>
     </x-slot>
 

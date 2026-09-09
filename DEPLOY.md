@@ -152,6 +152,21 @@ El video de la Calculadora es una URL incrustada y no toca el servidor, pero la 
 
 Los recursos publicados se cachean para siempre y la caché se invalida sola al guardar desde la consola. Si se toca la tabla `recursos_didacticos` a mano en la base de datos, hace falta `php artisan cache:clear`.
 
+### Datos de demostración
+
+Para enseñar la plataforma sin esperar a que alguien acumule historial:
+
+```bash
+php artisan tudi:demo --force      # siembra seis cuentas con 21 días de historial
+php artisan tudi:demo --limpiar    # las retira al terminar
+```
+
+El guion de la demostración, los escenarios de cada cuenta y el material de publicidad están en `PRESENTACION.md`. Las cuentas usan una contraseña conocida y una es administradora: **retíralas en cuanto termines**. `--limpiar` solo borra correos que terminan en `@demo.tudeficitinteligente.online`, así que es seguro sobre producción.
+
+### Dictado por voz: nada que configurar
+
+Desde `CLAUDE.md` §5.9 el dictado lo resuelve el navegador del usuario y **no consume cuota de Gemini**. El plan B que transcribía en el servidor sigue en el código pero está apagado; solo se enciende con `TRANSCRIPCION_FALLBACK_SERVIDOR=true` en `.env`, sabiendo que cada dictado pasa a ser una llamada facturable que además ocupa un worker de PHP-FPM.
+
 ## 8. Diagnóstico y error 504 (Gateway Time-out)
 
 ```bash

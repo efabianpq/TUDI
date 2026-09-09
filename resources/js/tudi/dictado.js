@@ -1,23 +1,44 @@
 /**
- * Dictado por voz (CLAUDE.md sección 4.21).
+ * Dictado por voz (CLAUDE.md sección 5.9).
  *
- * Dos caminos, en este orden:
+ * ── Reconocimiento nativo, sin coste ────────────────────────────────────────
  *
- *  1. **Web Speech API del navegador** — el audio no sale del dispositivo y no
- *     cuesta ninguna llamada al proveedor. Es el camino preferente.
- *  2. **Grabar y transcribir en el servidor** — MediaRecorder captura el audio
- *     y `POST /transcribir` lo convierte a texto. Es el plan B para Safari de
- *     iOS, donde la Web Speech API existe pero no emite resultados: pedía el
- *     micrófono, parecía grabar y nunca escribía nada (el fallo reportado).
+ * El único camino normal es la **Web Speech API del propio navegador**: quien
+ * reconoce la voz es el sistema operativo (Windows, Android, macOS e iOS lo
+ * traen de fábrica), el audio no sale del dispositivo y no cuesta ninguna
+ * llamada a un proveedor.
  *
- * Si el navegador no puede hacer ninguna de las dos, el botón del micrófono
- * queda oculto y el usuario escribe a mano, como hasta ahora.
+ * **iOS también entra por aquí.** Safari sí soporta `webkitSpeechRecognition`,
+ * pero ignora `continuous = true`: corta la sesión sola en cuanto detecta una
+ * pausa y dispara `end` con lo poco que llevara. Antes eso se leía como "en
+ * iOS no funciona" y se caía al plan B de servidor. La solución nativa es
+ * reconocer en tramos y **reengancharlos**: `continuous = false` y, al recibir
+ * `end`, arrancar otra sesión mientras el usuario no haya pulsado "Listo". El
+ * texto definitivo se va acumulando entre tramos, así que el usuario dicta
+ * seguido y no nota el corte.
+ *
+ * ── El plan B, apagado por defecto ──────────────────────────────────────────
+ *
+ * Grabar con MediaRecorder y transcribir en el servidor sigue implementado,
+ * pero solo se ofrece si el despliegue lo enciende a propósito
+ * (`TRANSCRIPCION_FALLBACK_SERVIDOR=true`): cada dictado sería una llamada
+ * facturable al proveedor y ocuparía un worker de PHP-FPM mientras dura. Sin
+ * él, la ruta `/transcribir` ni siquiera se anuncia en el HTML.
+ *
+ * Si el navegador no puede con el reconocimiento nativo y el plan B está
+ * apagado, el botón del micrófono queda oculto y el usuario escribe a mano.
  */
 
 import { mostrarCargando, ocultarCargando } from './cargando';
 
 /** Tope de grabación: pasado esto se cierra sola y se transcribe lo grabado. */
 const SEGUNDOS_MAXIMOS = 60;
+
+/**
+ * Cuántos tramos seguidos sin reconocer nada aceptamos antes de rendirnos.
+ * Sin este tope, un micrófono mudo reengancharía sesiones para siempre.
+ */
+const TRAMOS_MUDOS_MAXIMOS = 3;
 
 /** Contenedores que pedimos a MediaRecorder, del preferido al aceptable. */
 const FORMATOS = [
@@ -27,22 +48,29 @@ const FORMATOS = [
     { mime: 'audio/aac', extension: 'aac' },
 ];
 
-function esIos() {
+/**
+ * Safari corta la sesión de reconocimiento por su cuenta en cada pausa, así
+ * que allí hay que reenganchar tramos (ver la cabecera del archivo). No es una
+ * exclusión: iOS usa el mismo reconocimiento nativo que los demás.
+ */
+function necesitaReenganche() {
     return /iphone|ipad|ipod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+        || (/safari/i.test(navigator.userAgent) && ! /chrome|chromium|edg/i.test(navigator.userAgent));
 }
 
 function ClaseDeReconocimiento() {
     return window.SpeechRecognition || window.webkitSpeechRecognition;
 }
 
-/**
- * En iOS la clase existe pero no funciona, así que allí se va directo al plan B.
- */
 function hayReconocimiento() {
-    return Boolean(ClaseDeReconocimiento()) && ! esIos();
+    return Boolean(ClaseDeReconocimiento());
 }
 
+/**
+ * El plan B solo existe si el despliegue lo encendió: sin la meta con la ruta,
+ * no hay a dónde mandar el audio y no se gasta ninguna llamada al proveedor.
+ */
 function hayGrabacion() {
     return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder && window.fetch)
         && Boolean(rutaDeTranscripcion());
@@ -165,91 +193,178 @@ function avisar(mensaje) {
     setTimeout(() => nota.remove(), 8000);
 }
 
-// ── Camino 1: Web Speech API ────────────────────────────────────────────────
+// ── Reconocimiento nativo del navegador ─────────────────────────────────────
 
+/**
+ * Dicta usando el reconocedor del sistema operativo.
+ *
+ * En los navegadores que respetan `continuous = true` (Chrome y Edge, de
+ * escritorio y de Android) es una sola sesión de principio a fin. En Safari,
+ * que la corta en cada pausa, se reenganchan tramos hasta que el usuario pulsa
+ * "Listo" — de ahí `definitivo`, que sobrevive entre tramos, y el tope de
+ * tramos mudos, que evita reenganchar para siempre con un micrófono callado.
+ */
 function dictarConElNavegador(campo) {
-    const reconocimiento = new (ClaseDeReconocimiento())();
-    reconocimiento.lang = 'es-CO';
-    reconocimiento.interimResults = true;
-    reconocimiento.continuous = true;
+    const porTramos = necesitaReenganche();
 
     let definitivo = '';
+    let terminado = false;
     let cancelado = false;
-    let hubo = false;
+    let huboAlgo = false;
+    let tramosMudos = 0;
+    let reconocimiento = null;
 
-    reconocimiento.addEventListener('result', (evento) => {
-        let provisional = '';
-
-        for (let i = evento.resultIndex; i < evento.results.length; i += 1) {
-            const trozo = evento.results[i][0].transcript;
-
-            if (evento.results[i].isFinal) {
-                definitivo += trozo;
-            } else {
-                provisional += trozo;
-            }
-        }
-
-        hubo = true;
-        popup.parcial(`${definitivo}${provisional}`.trim());
-    });
-
-    reconocimiento.addEventListener('error', (evento) => {
-        cancelado = true;
+    const cerrarConTexto = () => {
         popup.cerrar();
 
-        if (evento.error === 'no-speech') {
-            avisar('No se escuchó nada. Acerca el micrófono y vuelve a intentarlo.');
-
-            return;
-        }
-
-        if (evento.error === 'aborted') {
-            return;
-        }
-
-        // Permiso denegado, sin micrófono o el servicio de reconocimiento del
-        // navegador no está disponible: se reintenta grabando y transcribiendo.
-        if (hayGrabacion()) {
-            dictarConElServidor(campo);
-
-            return;
-        }
-
-        avisar('Tu navegador no pudo usar el micrófono. Escríbelo a mano.');
-    });
-
-    reconocimiento.addEventListener('end', () => {
-        if (cancelado) {
-            return;
-        }
-
-        popup.cerrar();
-
-        if (hubo) {
+        if (huboAlgo) {
             insertarTexto(campo, definitivo);
         }
-    });
+    };
+
+    const nuevaSesion = () => {
+        const sesion = new (ClaseDeReconocimiento())();
+        sesion.lang = 'es-CO';
+        sesion.interimResults = true;
+        // Safari ignora `true` y corta igual; pedirle `false` deja explícito
+        // que aquí el que mantiene la continuidad es el reenganche.
+        sesion.continuous = ! porTramos;
+
+        let huboEnEsteTramo = false;
+
+        sesion.addEventListener('result', (evento) => {
+            let provisional = '';
+
+            for (let i = evento.resultIndex; i < evento.results.length; i += 1) {
+                const trozo = evento.results[i][0].transcript;
+
+                if (evento.results[i].isFinal) {
+                    // Entre tramos hace falta el espacio: cada sesión empieza
+                    // su transcripción de cero y no sabe qué se dijo antes.
+                    definitivo = definitivo ? `${definitivo.trim()} ${trozo.trim()}` : trozo;
+                } else {
+                    provisional += trozo;
+                }
+            }
+
+            huboAlgo = true;
+            huboEnEsteTramo = true;
+            tramosMudos = 0;
+            popup.parcial(`${definitivo} ${provisional}`.trim());
+        });
+
+        sesion.addEventListener('error', (evento) => {
+            // "no-speech" y "aborted" son el final normal de un tramo en
+            // Safari, no un fallo: se dejan para que `end` decida.
+            if (evento.error === 'no-speech' || evento.error === 'aborted') {
+                return;
+            }
+
+            terminado = true;
+            cancelado = true;
+            popup.cerrar();
+
+            if (evento.error === 'not-allowed' || evento.error === 'service-not-allowed') {
+                avisar('No se pudo usar el micrófono. Revisa el permiso del navegador o escríbelo a mano.');
+
+                return;
+            }
+
+            // El reconocedor del sistema no está disponible (sin red en algunos
+            // Android, servicio de voz desactivado). Solo si el despliegue
+            // encendió el plan B se intenta transcribir en el servidor.
+            if (hayGrabacion()) {
+                dictarConElServidor(campo);
+
+                return;
+            }
+
+            avisar('Tu navegador no pudo reconocer la voz. Escríbelo a mano.');
+        });
+
+        sesion.addEventListener('end', () => {
+            if (terminado || cancelado) {
+                if (! cancelado) {
+                    cerrarConTexto();
+                }
+
+                return;
+            }
+
+            if (! porTramos) {
+                terminado = true;
+                cerrarConTexto();
+
+                return;
+            }
+
+            if (! huboEnEsteTramo) {
+                tramosMudos += 1;
+            }
+
+            if (tramosMudos >= TRAMOS_MUDOS_MAXIMOS) {
+                terminado = true;
+
+                if (! huboAlgo) {
+                    popup.cerrar();
+                    avisar('No se escuchó nada. Acerca el micrófono y vuelve a intentarlo.');
+
+                    return;
+                }
+
+                cerrarConTexto();
+
+                return;
+            }
+
+            // Reenganche: otro tramo, conservando lo dictado hasta ahora.
+            reconocimiento = nuevaSesion();
+            arrancar(reconocimiento);
+        });
+
+        return sesion;
+    };
+
+    const arrancar = (sesion) => {
+        try {
+            sesion.start();
+        } catch {
+            // `start()` sobre una sesión que el navegador todavía no cerró:
+            // se reintenta en el siguiente tick en vez de perder el dictado.
+            setTimeout(() => {
+                if (terminado || cancelado) {
+                    return;
+                }
+
+                try {
+                    sesion.start();
+                } catch {
+                    terminado = true;
+                    popup.cerrar();
+
+                    if (hayGrabacion()) {
+                        dictarConElServidor(campo);
+                    }
+                }
+            }, 250);
+        }
+    };
 
     popup.abrir({
-        alTerminar: () => reconocimiento.stop(),
+        alTerminar: () => {
+            terminado = true;
+            reconocimiento?.stop();
+        },
         alCancelar: () => {
+            terminado = true;
             cancelado = true;
-            reconocimiento.abort();
+            reconocimiento?.abort();
             popup.cerrar();
         },
     });
 
-    try {
-        reconocimiento.start();
-    } catch {
-        cancelado = true;
-        popup.cerrar();
-
-        if (hayGrabacion()) {
-            dictarConElServidor(campo);
-        }
-    }
+    reconocimiento = nuevaSesion();
+    arrancar(reconocimiento);
 }
 
 // ── Camino 2: grabar y transcribir en el servidor ───────────────────────────

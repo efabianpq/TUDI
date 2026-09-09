@@ -83,6 +83,28 @@ return [
         'connect_timeout' => (int) env('GEMINI_CONNECT_TIMEOUT', 5),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Dictado por voz
+    |--------------------------------------------------------------------------
+    |
+    | CLAUDE.md sección 5.9. El camino normal es la Web Speech API del propio
+    | navegador: el reconocimiento lo hace el sistema operativo (Windows,
+    | Android, macOS e iOS lo traen), el audio no sale del dispositivo y no
+    | cuesta nada.
+    |
+    | `fallback_servidor` enciende el plan B, que graba el audio y lo transcribe
+    | con Gemini. Está APAGADO por defecto porque cada dictado sería una llamada
+    | facturable al proveedor y, mientras dura, ocupa un worker de PHP-FPM
+    | (sección 5.13). Solo tiene sentido encenderlo para un navegador concreto
+    | que no soporte reconocimiento nativo, y sabiendo lo que cuesta.
+    |
+    */
+
+    'transcripcion' => [
+        'fallback_servidor' => (bool) env('TRANSCRIPCION_FALLBACK_SERVIDOR', false),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

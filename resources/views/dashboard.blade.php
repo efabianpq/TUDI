@@ -20,22 +20,11 @@
 
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between gap-4">
-            <a href="{{ route('dashboard') }}" class="text-tudi-ink no-underline sm:hidden">
-                <x-tudi.marca :size="26" :texto="17" />
-            </a>
-
-            <div class="hidden min-w-0 sm:block">
-                <h1 class="text-3xl font-semibold tracking-tudi-display">
-                    {{ __('Buen día') }}, {{ str(Auth::user()->name)->before(' ') }}
-                </h1>
-                <p class="mt-1 text-sm text-tudi-ink-3 first-letter:uppercase">{{ now()->translatedFormat('l d \d\e F') }}</p>
-            </div>
-
-            <div class="flex items-center gap-2">
-                <span class="tudi-meta uppercase sm:hidden">{{ now()->translatedFormat('d M') }}</span>
-                <x-tudi.avatar-menu />
-            </div>
+        <div class="min-w-0">
+            <h1 class="text-xl font-semibold tracking-tudi-display sm:text-3xl">
+                {{ __('Buen día') }}, {{ str(Auth::user()->name)->before(' ') }}
+            </h1>
+            <p class="mt-1 text-sm text-tudi-ink-3 first-letter:uppercase">{{ now()->translatedFormat('l d \d\e F') }}</p>
         </div>
     </x-slot>
 

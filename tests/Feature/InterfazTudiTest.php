@@ -295,13 +295,47 @@ it('acepta decimales tecleados con coma en el peso del día', function () {
 |--------------------------------------------------------------------------
 */
 
-it('descuenta el safe area superior para que la cabecera no quede bajo la barra del sistema', function () {
+it('descuenta el safe area superior para que la barra no quede bajo la del sistema', function () {
     // Instalada como app en iOS, la barra de estado es translúcida y la página
     // empieza debajo del reloj: sin este padding el menú de la cuenta quedaba
     // solapado y no se podía pulsar.
     $this->actingAs(usuarioDelRediseno())->get(route('dashboard'))
         ->assertOk()
-        ->assertSee('pt-[calc(env(safe-area-inset-top)+1.25rem)]', escape: false);
+        ->assertSee('pt-[env(safe-area-inset-top)]', escape: false)
+        ->assertSee('pt-[calc(env(safe-area-inset-top)+3.75rem)]', escape: false);
+});
+
+it('pone la misma barra superior en todas las pantallas, no solo en Inicio', function () {
+    $usuario = usuarioDelRediseno();
+
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    // La barra vive en el layout, así que marca, fecha y menú de la cuenta
+    // están en todas partes (CLAUDE.md sección 5.12). Antes cada vista montaba
+    // su cabecera y solo algunas incluían el menú.
+    foreach ([
+        route('dashboard'),
+        route('calculadora.edit'),
+        route('planes.index'),
+        route('planes.show', $registroDiario),
+        route('profile.edit'),
+    ] as $url) {
+        $this->actingAs($usuario)->get($url)
+            ->assertOk()
+            ->assertSee('tudi-topbar', escape: false)
+            ->assertSee('Cerrar sesión')
+            ->assertSee('Mi cuenta');
+    }
+});
+
+it('no repite el menú de la cuenta dentro de las pantallas', function () {
+    // Una sola instancia por página: la del layout. Dos menús abiertos a la vez
+    // con el mismo x-data era el síntoma de que cada vista traía el suyo.
+    $html = $this->actingAs(usuarioDelRediseno())->get(route('dashboard'))->getContent();
+
+    expect(substr_count($html, 'aria-haspopup="true"'))->toBe(1);
 });
 
 it('nombra los macros con la palabra completa donde cabe, no con la inicial', function () {
