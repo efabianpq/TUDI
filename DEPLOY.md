@@ -73,7 +73,7 @@ php artisan tudi:diagnostico
 
 ## 4. Cron job: la única tarea programada del servidor
 
-Hostinger permite cron jobs, pero el proyecto asume que solo se puede depender de **uno** (ver `CLAUDE.md` sección 10) — toda la automatización diaria real (cierre automático a las 00:15, cálculo de tendencias a las 00:30) vive en el Scheduler de Laravel (`routes/console.php`), no en cron jobs independientes.
+Hostinger permite cron jobs, pero el proyecto asume que solo se puede depender de **uno** (ver `CLAUDE.md` sección 10) — toda la automatización diaria real (cierre automático a las 00:15, cálculo de tendencias a las 00:30, vencimiento de las pruebas de Premium a las 00:45) vive en el Scheduler de Laravel (`routes/console.php`), no en cron jobs independientes.
 
 Configurar en hPanel → Avanzado → Cron Jobs, con periodicidad **cada minuto**:
 

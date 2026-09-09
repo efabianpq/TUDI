@@ -32,6 +32,21 @@ class TranscripcionNoDisponibleException extends RuntimeException
     }
 
     /**
+     * El plan B de servidor es de pago (CLAUDE.md sección 5.18): cada llamada
+     * se factura. Dictar sigue siendo gratis para todo el mundo por el camino
+     * normal —el reconocedor del propio navegador—, así que el mensaje apunta
+     * ahí antes que a la caja.
+     */
+    public static function requierePremium(bool $pruebaTerminada = false): self
+    {
+        return new self(
+            ($pruebaTerminada ? 'Tu prueba de Premium terminó. ' : '').
+            'Transcribir el audio en el servidor es parte de Premium. Dictar con el micrófono '.
+            'de tu navegador sigue siendo gratis, y también puedes escribirlo a mano.'
+        );
+    }
+
+    /**
      * El audio llegó bien y el modelo respondió, pero no había nada que
      * transcribir (silencio, ruido, o el micrófono no capturó voz).
      */

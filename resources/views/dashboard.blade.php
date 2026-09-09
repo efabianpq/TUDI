@@ -35,6 +35,9 @@
 
     <div class="space-y-8">
 
+        {{-- Estado del plan: una línea, sin bloquear nada (sección 5.18). --}}
+        <x-tudi.plan />
+
         {{-- ══ Hoy: el déficit es el único dato protagonista ══ --}}
         @if ($errorResumen)
             <div class="tudi-panel">
@@ -291,7 +294,16 @@
             </div>
 
             <div class="tudi-card p-5 sm:p-6">
-                @if ($recomendacionesPendientes->isEmpty())
+                {{--
+                    En el plan Gratis no se generan recomendaciones (sección
+                    5.18), así que "no tienes ninguna pendiente" sería engañoso:
+                    no es que su ritmo esté bien, es que el motor no corre.
+                --}}
+                @if (! $premium)
+                    <p class="text-sm text-tudi-muted">
+                        {{ __('El motor de ajustes es parte de Premium. Tus cifras se siguen guardando.') }}
+                    </p>
+                @elseif ($recomendacionesPendientes->isEmpty())
                     <p class="text-sm text-tudi-muted">{{ __('No tienes recomendaciones pendientes.') }}</p>
                 @else
                     <ul class="space-y-4">
@@ -316,6 +328,7 @@
                     </ul>
                 @endif
 
+                @if ($premium)
                 <div class="mt-6 border-t border-tudi-divider pt-5">
                     <p class="tudi-label">{{ __('Historial') }}</p>
 
@@ -341,6 +354,7 @@
                         </ol>
                     @endif
                 </div>
+                @endif
             </div>
         </section>
     </div>

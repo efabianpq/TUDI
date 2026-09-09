@@ -6,21 +6,27 @@ use App\Models\User;
 use App\Notifications\CuentaActivada;
 use App\Notifications\CuentaPendienteDeActivacion;
 use App\Notifications\NuevoUsuarioPendiente;
+use App\Notifications\NuevoUsuarioRegistrado;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 
 /**
- * Ciclo de vida de una cuenta (CLAUDE.md sección 4.26).
+ * Ciclo de vida de una cuenta (CLAUDE.md sección 5.1).
  *
- * Cualquiera puede registrarse, pero la cuenta nace `pendiente` con un código
- * de activación que **no** se le envía al usuario: se lo entrega el
- * administrador por fuera de la aplicación (WhatsApp, en persona, donde sea).
- * Es la validación manual que pide el negocio — el correo que sí recibe el
- * usuario solo le dice que su cuenta está creada y que pida su código.
+ * **Una cuenta nueva nace activa y con su prueba de Premium corriendo.** Desde
+ * que existe la landing pública (sección 5.19) el registro es el embudo de
+ * adquisición: hacer esperar a un visitante a que un administrador le pase un
+ * código por WhatsApp convertía la landing en un formulario de lista de espera.
+ *
+ * La validación manual por código no se ha tirado, ha cambiado de sitio: el
+ * estado `pendiente`, la pantalla de activación y el middleware siguen ahí, y
+ * ahora los usa el administrador cuando quiere devolver una cuenta a revisión
+ * (`regenerarCodigo()`), que es cuando esa validación tiene sentido.
  *
  * Toda la lógica vive aquí y no en los controladores (regla no negociable de la
  * sección 3): quién puede activar, cómo se genera el código y a quién se avisa.
+ * El plan con el que nace la cuenta lo pone PlanService, que es su dueño.
  */
 class CuentaService
 {
@@ -32,29 +38,40 @@ class CuentaService
 
     private const LONGITUD_CODIGO = 8;
 
+    public function __construct(
+        private readonly PlanService $planes,
+    ) {}
+
     /**
-     * Registra una cuenta nueva, ya pendiente de activación, y avisa al usuario
-     * y a los administradores.
+     * Registra una cuenta nueva: activa, con la prueba de Premium ya corriendo,
+     * y avisa al usuario y a los administradores.
+     *
+     * La cuenta y su plan se escriben en la misma transacción a propósito: una
+     * cuenta creada sin prueba sería una cuenta que perdió los días de prueba que la
+     * landing le prometió, y nadie se daría cuenta hasta que reclamara.
      *
      * @param  array{name: string, email: string, password: string}  $datos  con la contraseña ya hasheada
      */
     public function registrar(array $datos): User
     {
-        $usuario = DB::transaction(fn (): User => User::create([
-            ...$datos,
-            'rol' => User::ROL_USUARIO,
-            'estado' => User::ESTADO_PENDIENTE,
-            'codigo_activacion' => $this->generarCodigo(),
-            'activado_en' => null,
-        ]));
+        $usuario = DB::transaction(function () use ($datos): User {
+            $usuario = User::create([
+                ...$datos,
+                'rol' => User::ROL_USUARIO,
+                'estado' => User::ESTADO_ACTIVO,
+                'codigo_activacion' => null,
+                'activado_en' => now(),
+            ]);
 
-        // El usuario recibe el aviso, nunca el código.
-        $usuario->notify(new CuentaPendienteDeActivacion);
+            return $this->planes->iniciarPrueba($usuario);
+        });
+
+        $usuario->notify(new CuentaActivada);
 
         $administradores = $this->administradores();
 
         if ($administradores->isNotEmpty()) {
-            Notification::send($administradores, new NuevoUsuarioPendiente($usuario));
+            Notification::send($administradores, new NuevoUsuarioRegistrado($usuario));
         }
 
         return $usuario;
@@ -102,8 +119,13 @@ class CuentaService
     }
 
     /**
-     * Genera un código nuevo para una cuenta pendiente: el anterior deja de
-     * servir, que es lo que hace útil poder regenerarlo si se filtró.
+     * Devuelve la cuenta a validación manual con un código nuevo: el anterior
+     * deja de servir, que es lo que hace útil poder regenerarlo si se filtró.
+     *
+     * Desde que el registro ya no crea cuentas pendientes (arriba), esta es la
+     * puerta de entrada al estado `pendiente`, así que es aquí donde se avisa:
+     * al usuario, que su cuenta espera un código; a los administradores, cuál
+     * es —el correo es una comodidad, el código también está en la consola.
      */
     public function regenerarCodigo(User $usuario): string
     {
@@ -114,6 +136,14 @@ class CuentaService
             'codigo_activacion' => $codigo,
             'activado_en' => null,
         ])->save();
+
+        $usuario->notify(new CuentaPendienteDeActivacion);
+
+        $administradores = $this->administradores();
+
+        if ($administradores->isNotEmpty()) {
+            Notification::send($administradores, new NuevoUsuarioPendiente($usuario));
+        }
 
         return $codigo;
     }

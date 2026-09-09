@@ -85,22 +85,17 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         'email' => 'ana@example.com',
         'password' => 'password',
         'password_confirmation' => 'password',
-    ])->assertRedirect(route('activacion.create', absolute: false));
+    ])->assertRedirect(route('calculadora.edit', absolute: false));
 
     $this->assertAuthenticated();
 
     $usuario = User::firstWhere('email', 'ana@example.com');
 
-    // La cuenta nace pendiente: hasta canjear el código que entrega el
-    // administrador no se entra a la aplicación (sección 4.26). Que el resto de
-    // la aplicación esté cerrada mientras tanto lo cubre tests/Feature/ActivacionTest.php;
-    // aquí no se hace ese GET a propósito, porque fijaría la "URL anterior" de
-    // la sesión y con ella el destino de los `Redirect::back()` de más abajo.
-    $this->actingAs($usuario)
-        ->post(route('activacion.store'), ['codigo' => $usuario->codigo_activacion])
-        ->assertRedirect(route('calculadora.edit'));
-
-    $usuario->refresh();
+    // La cuenta entra activa y con su prueba de Premium corriendo (sección
+    // 5.18), así que el día completo que sigue —que pasa por la distribución
+    // con IA y por el cierre con estimación— está dentro de su plan.
+    expect($usuario->estaActiva())->toBeTrue()
+        ->and($usuario->tienePremium())->toBeTrue();
 
     // Recién registrado el perfil nutricional está vacío: sin él no se puede
     // generar plan ni cerrar el día (secciones 4.2 y 4.5).

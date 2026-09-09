@@ -7,6 +7,7 @@ use App\Http\Controllers\CierreDiarioController;
 use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IngredienteDisponibleController;
+use App\Http\Controllers\LandingController;
 use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
@@ -14,9 +15,12 @@ use App\Http\Controllers\RecomendacionSistemaController;
 use App\Http\Controllers\TranscripcionController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return redirect()->route(auth()->check() ? 'dashboard' : 'login');
-});
+/*
+ * Landing pública (CLAUDE.md sección 5.19). Única ruta de la aplicación que se
+ * sirve sin sesión; con sesión sigue redirigiendo al panel de inicio, como
+ * hacía antes de que existiera la página.
+ */
+Route::get('/', LandingController::class)->name('landing');
 
 /*
  * Activación de la cuenta (CLAUDE.md sección 4.26). Va fuera del grupo con

@@ -49,6 +49,15 @@ class UserFactory extends Factory
             'estado' => User::ESTADO_ACTIVO,
             'codigo_activacion' => null,
             'activado_en' => now(),
+            /*
+             * Y con plan Premium, por el mismo motivo que nace activa: la
+             * inmensa mayoría de los tests ejercitan la aplicación completa, no
+             * el control de acceso por plan. Para eso hay estados explícitos
+             * (`gratis()`, `enPrueba()`, `pruebaVencida()`), igual que
+             * `pendiente()` para el alta.
+             */
+            'plan' => User::PLAN_PREMIUM,
+            'plan_expira_en' => null,
             'peso_kg' => $pesoKg,
             'estatura_m' => fake()->randomFloat(2, 1.50, 2.00),
             'edad' => fake()->numberBetween(18, 65),
@@ -122,6 +131,41 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $atributos) => [
             'estado' => User::ESTADO_SUSPENDIDO,
+        ]);
+    }
+
+    /**
+     * Plan Gratis: sin las funciones que llaman al proveedor de IA, sin motor
+     * de recomendaciones y con el historial recortado (CLAUDE.md sección 5.18).
+     */
+    public function gratis(): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'plan' => User::PLAN_GRATIS,
+            'plan_expira_en' => null,
+        ]);
+    }
+
+    /**
+     * Prueba de Premium en curso.
+     */
+    public function enPrueba(int $diasRestantes = 7): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'plan' => User::PLAN_TRIAL,
+            'plan_expira_en' => now()->addDays($diasRestantes),
+        ]);
+    }
+
+    /**
+     * Prueba caducada que el cron nocturno todavía no ha barrido: vale como
+     * Gratis desde el instante en que venció, no desde que corre el comando.
+     */
+    public function pruebaVencida(int $diasAtras = 1): static
+    {
+        return $this->state(fn (array $atributos) => [
+            'plan' => User::PLAN_TRIAL,
+            'plan_expira_en' => now()->subDays($diasAtras),
         ]);
     }
 

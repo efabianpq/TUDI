@@ -28,6 +28,9 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 |---|---|
 | Usuarios y perfil | `app/Models/User.php`, `app/Http/Controllers/ProfileController.php` |
 | Ciclo de vida de la cuenta | `app/Services/CuentaService.php`, `app/Http/Controllers/ActivacionController.php`, `app/Http/Middleware/EnsureCuentaActiva.php`, `app/Notifications/*` |
+| Plan del usuario y prueba de Premium | `app/Services/PlanService.php`, `config/planes.php`, `app/Console/Commands/ExpirarPruebas.php` (`app:expirar-pruebas`, `dailyAt('00:45')`) |
+| Control de acceso a las funciones de IA | `app/Services/AI/PremiumGatedMealDistributionProvider.php` + `PremiumGatedTranscripcionProvider.php` (decoradores bindeados en `AppServiceProvider`) |
+| Landing pública | `app/Http/Controllers/LandingController.php`, `resources/views/welcome.blade.php` |
 | Cálculo nutricional | `app/Services/NutritionCalculatorService.php` (fuente de verdad, sección 7) |
 | Calculadora Déficit | `app/Http/Controllers/ProfileParametersController.php` (rutas `/calculadora`) |
 | Planes diarios (hub del día) | `app/Http/Controllers/PlanComidaController.php`, compone `MealDistributionService` + `ActivitySuggestionService` + `DailyClosureService` |
@@ -56,7 +59,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 `Usuario` 1—N `MetricaTendencia`
 
 - **Nombres de tabla explícitos** (`protected $table`) porque el pluralizador de Laravel no acierta con compuestos en español: `registros_diarios`, `planes_comida`, `comidas_reales`, `actividades_fisicas`, `metricas_tendencia`, `recomendaciones_sistema`, `ingredientes_disponibles` (sin usar, sección 6), `parametros_maestros`.
-- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora), `reparto_comidas` (json nullable, el reparto habitual — sección 5.14) + administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1).
+- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora), `reparto_comidas` (json nullable, el reparto habitual — sección 5.14), administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1) y **plan** (`plan` enum(gratis,trial,premium) default `gratis`, `plan_expira_en` timestamp nullable — sección 5.18). `estado` y `plan` son dos dimensiones distintas: el primero decide **si** entra, el segundo **qué** funciones tiene.
 - **`registros_diarios`**: `usuario_id` + `fecha` (único), `peso_kg` del día, el snapshot del cierre (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, y objetivo/consumido de los tres macros: `proteina_objetivo_g`/`proteina_consumida_g`, `grasa_objetivo_g`/`grasa_consumida_g`, `carbohidratos_objetivo_g`/`carbohidratos_consumidos_g`), `cerrado` + `cerrado_en`, `ingredientes_desayuno`/`ingredientes_almuerzo`/`ingredientes_cena` (texto libre por comida) y `reparto_comidas` (json nullable, el reparto de ese día).
 - **`planes_comida`**: `tipo_comida` enum(desayuno,almuerzo,cena,snack), macros estimados, `descripcion` + `preparacion` + `notas_ia`, `ingredientes_detalle` (json, snapshot denormalizado a propósito — sigue siendo legible aunque se editen los ingredientes de origen).
 - **`comidas_reales`**: `plan_comida_id` único (relación 1—1, nunca se sobrescribe el plan), macros reales, `consumido_en`, `notas`, `imagen_evidencia`.
@@ -73,14 +76,17 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 
 ### 5.1 Cuentas: registro, activación y ciclo de vida
 
-Cualquiera puede registrarse (`RegisteredUserController` → `CuentaService::registrar()`), pero la cuenta nace **`pendiente`** con un código de activación de 8 caracteres (alfabeto sin 0/O/1/I/L) que **nunca viaja en el correo del usuario** — se lo entrega el administrador por fuera de la aplicación. El correo al usuario (`CuentaPendienteDeActivacion`, en cola) solo le dice que lo pida; el correo a los administradores (`NuevoUsuarioPendiente`) sí lo lleva.
+Cualquiera puede registrarse (`RegisteredUserController` → `CuentaService::registrar()`) y **la cuenta nace activa, con su prueba de Premium ya corriendo** (sección 5.18) y va directa a la Calculadora. Desde que hay landing pública (sección 5.19) el registro es el embudo de adquisición: hacer esperar a un visitante a que un administrador le pase un código convertía la landing en una lista de espera.
 
-- **Middleware `cuenta.activa`** (`EnsureCuentaActiva`): una cuenta `pendiente` va a `GET/POST /activacion` sin perder la sesión; una `suspendida` pierde la sesión y vuelve al login con el motivo. No se aplica a las rutas de autenticación ni a la propia activación (evitaría un bucle).
+**La validación manual por código no se tiró, cambió de sitio.** El estado `pendiente`, la pantalla de activación y el middleware siguen enteros, y ahora la puerta de entrada a `pendiente` es `CuentaService::regenerarCodigo()`: el administrador devuelve una cuenta a revisión y entonces sí salen los dos correos de siempre (`CuentaPendienteDeActivacion` al usuario, sin el código; `NuevoUsuarioPendiente` a los administradores, con él). El código es de 8 caracteres, alfabeto sin 0/O/1/I/L.
+
+- **Middleware `cuenta.activa`** (`EnsureCuentaActiva`): una cuenta `pendiente` va a `GET/POST /activacion` sin perder la sesión; una `suspendida` pierde la sesión y vuelve al login con el motivo. No se aplica a las rutas de autenticación ni a la propia activación (evitaría un bucle). **Ningún plan pasa por aquí**: el plan nunca deja a nadie fuera.
 - **`ActivacionController`** canjea el código contra la cuenta con sesión iniciada (`hash_equals`, tiempo constante); al activar se quema el código y se avisa por correo (`CuentaActivada`).
-- **`CuentaService`** es el único punto con lógica de ciclo de vida: `registrar()`, `activarConCodigo()`, `activar()` (desde consola), `suspender()` (no borra datos), `regenerarCodigo()`.
+- **`CuentaService`** es el único punto con lógica de ciclo de vida: `registrar()`, `activarConCodigo()`, `activar()` (desde consola), `suspender()` (no borra datos), `regenerarCodigo()`. El plan con el que nace la cuenta lo pone `PlanService`, que es su dueño.
+- Correos del alta: al usuario `CuentaActivada` (con los días de prueba si los tiene), a los administradores `NuevoUsuarioRegistrado` (sin código, porque ya no hay ninguno que entregar).
 - Todas las notificaciones son `ShouldQueue` — esperar al SMTP en la petición web ocupa un worker de PHP-FPM (sección 5.13).
 - `php artisan tudi:hacer-admin {email}` crea el primer administrador (activa la cuenta de paso, porque la consola exige ya serlo).
-- Auth estándar de Breeze (registro, login, logout, recuperación de contraseña) en `routes/auth.php`. `GET /` redirige a `dashboard` o `login` según sesión; no hay landing pública.
+- Auth estándar de Breeze (registro, login, logout, recuperación de contraseña) en `routes/auth.php`. `GET /` sirve la landing sin sesión y redirige a `dashboard` con ella (sección 5.19).
 
 ### 5.2 Calculadora Déficit (`/calculadora`)
 
@@ -238,9 +244,47 @@ Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada d
 `DemoSeeder` + `php artisan tudi:demo` siembran seis cuentas, cada una parada en un punto distinto del recorrido, para poder enseñar la plataforma sin esperar tres semanas a que alguien acumule historial. Guion de la demostración y material de publicidad en `PRESENTACION.md`.
 
 - **El historial no se inventa:** se crean los `PlanComida`/`ComidaReal`/`ActividadFisica` de cada día y se llama a `DailyClosureService::cerrar()`, así que el déficit y las recomendaciones salen de la lógica de dominio. **No llama al proveedor de IA**: los planes se escriben desde un catálogo de comidas de ejemplo (sembrar 21 días × 6 cuentas costaría cientos de llamadas facturables).
-- **Escenarios cubiertos:** administradora, cuenta pendiente con código, cuenta activa sin Calculadora, y tres perfiles con 21 días de historial cuya pendiente de peso los sitúa en ritmo correcto (sin recomendación), demasiado lento (propone reducir) y demasiado rápido (propone aumentar). El día de hoy queda **abierto y a medias** a propósito.
+- **Escenarios cubiertos:** administradora, cuenta pendiente con código, cuenta activa sin Calculadora, y tres perfiles con 21 días de historial cuya pendiente de peso los sitúa en ritmo correcto (sin recomendación), demasiado lento (propone reducir) y demasiado rápido (propone aumentar). El día de hoy queda **abierto y a medias** a propósito. Las tres con historial van en `premium` (si no, el motor de recomendaciones no correría y sus tres escenarios se verían iguales); las dos que estrenan cuenta van en `trial`, y la de "sin Calculadora" a 1 día de vencer, para enseñar también el aviso del plan.
 - **Idempotente y acotado:** cada cuenta se busca por correo y su historial se rehace; `--limpiar` borra solo las cuentas cuyo correo termina en `@demo.tudeficitinteligente.online`, así que es seguro correrlo sobre producción. Cubierto por `tests/Feature/DemoSeederTest.php`, que fija el escenario de cada cuenta: si "baja-lento" dejara de generar su recomendación, la demo enseñaría una pantalla vacía.
 - Las cuentas usan una contraseña conocida y una es administradora: **retirarlas al terminar**.
+
+### 5.18 Plan del usuario: gratis, prueba y Premium
+
+`users.plan` (gratis|trial|premium) + `users.plan_expira_en`. **Dos columnas y no una tabla `suscripciones`**: mientras no haya cobro, un usuario tiene exactamente un plan y una fecha en la que deja de tenerlo — el mismo patrón que `estado`/`activado_en`, no un mecanismo nuevo. La sesión de la pasarela de pago añadirá las tablas de cobros que necesite; estas dos seguirán siendo el plan vigente. Por defecto `gratis`, para que las cuentas que ya existían no estrenen una prueba retroactiva de la que nadie las avisó.
+
+**Quién tiene Premium se responde contra el reloj, no contra la tabla.** `User::tienePremium()` da falso a un `trial` cuya fecha ya pasó aunque el cron nocturno todavía no lo haya degradado, así que el vencimiento se nota en el mismo instante en que ocurre. `enPrueba()`, `diasDePruebaRestantes()` (redondea hacia arriba) y `pruebaTerminada()` distinguen "se te acabó" de "nunca la tuviste", que son dos mensajes distintos.
+
+- **`PlanService`** es el espejo de `CuentaService` y el único sitio con transiciones de plan: `iniciarPrueba()` (al registrarse, sin pedirla y sin tarjeta; idempotente hacia arriba — no le acorta la prueba a quien ya la tiene ni se la quita a un Premium), `expirarVencidos()` (UPDATE masivo), `activarPremium()`/`degradarAGratis()` (las manijas que usará el cobro) y `precios()`.
+- **`app:expirar-pruebas`**, `dailyAt('00:45')` — **después** del cierre (00:15) y las tendencias (00:30): así el último día de prueba se cierra y genera sus recomendaciones antes de que la cuenta caiga a Gratis. Solo ordena la tabla, no decide.
+- **Vencer no quita nada.** El usuario conserva cuenta, acceso y todo su historial; solo deja de ver las funciones de Premium. No existe ningún estado en el que el plan cierre la aplicación.
+
+**Qué es de pago, y dónde se corta:**
+
+| Función | Punto de corte |
+|---|---|
+| Distribución de comidas con IA | `PremiumGatedMealDistributionProvider::distribuirDia()` |
+| Estimación de consumo real en el cierre | `PremiumGatedMealDistributionProvider::estimarConsumoReal()` |
+| Plan B del dictado (transcribir en el servidor) | `PremiumGatedTranscripcionProvider::transcribir()` |
+| Motor de recomendaciones | `DailyClosureService::generarRecomendaciones()` |
+| Historial: gráfico > 7 días y seguimiento > 1 semana | `DashboardController` |
+
+- **El control vive en el borde del proveedor, no en los controladores.** Las interfaces de `app/Services/AI` son el único camino hacia Gemini, así que se envuelven en `AppServiceProvider` y un solo decorador cubre las dos funciones que las cruzan. Ningún camino nuevo puede saltárselo por olvidar un `if`. Los decoradores lanzan las excepciones de dominio que los controladores ya traducían (`MealDistributionUnavailableException::requierePremium()`, `TranscripcionNoDisponibleException::requierePremium()`), así que ningún controlador cambió y el usuario ve un mensaje que explica qué plan hace falta, nunca un error genérico ni un 500.
+- **Sin sesión no hay plan que comprobar** (consola, seeders): se deja pasar. Hoy nada de eso llama al proveedor.
+- **Dictar ingredientes es gratis para todos**, y por eso no aparece como exclusiva de Premium en la landing: lo resuelve el reconocedor del navegador, el audio no sale del dispositivo y no cuesta una llamada (sección 5.9). Lo gateado es solo el plan B de servidor, que se factura y está apagado por defecto. Es la única desviación deliberada respecto de la tabla del mockup de la landing, que lo listaba como Premium cuando ya no dependía de la IA.
+- **El corte de las recomendaciones va en la generación, no en la vista**: una recomendación creada y luego escondida seguiría moviendo `calorias_objetivo` el día que el usuario volviera a Premium y la confirmara sin haberla visto nunca. Cerrar el día **no** es Premium: en Gratis se cierra con todas sus cifras, por el camino de "sí, lo cumplí", que no gasta ninguna llamada.
+- **Precios en un solo sitio**: `config/planes.php` (mensual, anual, días de prueba y qué incluye cada plan). El descuento anual no se declara — `PlanService::precios()` lo deriva de los dos importes para que no pueda contradecirlos. Cuando entre el cobro, el importe cobrado tiene que salir de ese mismo archivo.
+- La interfaz lo dice en una línea y sin bloquear (`x-tudi.plan` en Inicio): días de prueba restantes, o que la prueba terminó y el historial sigue ahí. Un Premium pagante no ve nada.
+- **`UserFactory` nace `premium`** por el mismo motivo que nace `activo`: casi ningún test va del cobro. Para eso están `gratis()`, `enPrueba()` y `pruebaVencida()`.
+- **Pendiente para la siguiente sesión: la pasarela de pago (Wompi).** No hay checkout, ni webhooks, ni facturación, ni forma de pasar a `premium` salvo `PlanService::activarPremium()` desde consola. La landing anuncia el precio; el botón "Actualizar a Premium" del aviso de plan (`x-tudi.plan`) es a propósito un `<button type="button">` sin acción — se ve como el resto de la interfaz, pero no navega a ningún sitio, porque `tudeficitinteligente.online` va a usarse para pilotos de viabilidad y todavía no hay checkout que ofrecer. En cuanto lo haya, es el único botón que hay que enlazar.
+- **Días de prueba:** 3 por defecto (`TUDI_PRUEBA_DIAS`, `config/planes.php`), no 7. Se lee dinámicamente en toda la aplicación (notificaciones, landing, `DemoSeeder`) — cambiarlo es cambiar esa única línea.
+
+### 5.19 Landing pública (`/`)
+
+`LandingController` sobre `resources/views/welcome.blade.php` (que era el starter de Laravel sin usar). Sin sesión sirve la página; con sesión sigue redirigiendo a `dashboard`, como antes de que existiera.
+
+- Secciones del mockup aprobado (`resources/branding/.../design/TUDI-landing-publica.dc.html`): nav, hero con el anillo de déficit, tres pasos, diferenciador, precios y CTA final. **Los textos se acotaron a lo que la aplicación hace de verdad** — el dictado se describe como lo que es, reconocimiento del navegador, y el pie de precios dice que el cobro todavía no está abierto.
+- **No usa `layouts.guest`**: aquel es la tarjeta centrada del login. Sí usa el mismo sistema visual (tokens y `.tudi-*`), así que pasar de la landing al registro no cambia de mundo. Mobile-first, con la barra de navegación acortando su CTA por debajo de `sm:` para no partir en dos líneas.
+- Los dos botones de precios llevan al **mismo** `register`: no hay ruta de alta distinta para Premium. "Probar X días gratis" es el refuerzo visual de lo que el registro ya hace solo (sección 5.18).
 
 ## 6. Rutas y código sin usar, conservados a propósito
 
@@ -251,6 +295,7 @@ No son deuda técnica olvidada — cada uno se conserva por una razón concreta 
 - **`NutritionAiProviderInterface` + `RuleBasedNutritionProvider`**: desacopla "quién decide" la selección de ingredientes sobre inventario estructurado (usada por `MealPlanGeneratorService`) de una futura IA generativa para ese mismo problema — distinto del problema que resuelve `MealDistributionProviderInterface` (interpretar lenguaje natural).
 - **`ComidaRealController@create`/`@store`** (`/plan/{planComida}/comida-real`, "Registrar con detalle"): el botón por comida desapareció del plan diario (sección 5.3); sigue disponible para corregir macros exactos a mano. `@destroy` del mismo controlador **sí** está enlazado — es el "Cambiar mi respuesta" del cierre (sección 5.5).
 - **`ClaudeMealDistributionProvider`**: proveedor de IA anterior a Gemini, sin bindear, por si hiciera falta volver atrás.
+- **Activación por código** (`ActivacionController`, `/activacion`, estado `pendiente`, `EnsureCuentaActiva`): ya no es el camino del alta (sección 5.1), pero sigue siendo la herramienta con la que un administrador devuelve una cuenta a validación manual desde `regenerarCodigo()`.
 
 ## 7. Algoritmo de cálculo nutricional (fuente de verdad)
 
@@ -327,7 +372,7 @@ Cubierto por `tests/Unit/NutritionCalculatorServiceTest.php`.
 
 **Paso a paso completo en `DEPLOY.md`.** Resumen de las decisiones de fondo:
 
-- Un solo cron job (`schedule:run` cada minuto); toda la automatización diaria vive en `routes/console.php`.
+- Un solo cron job (`schedule:run` cada minuto); toda la automatización diaria vive en `routes/console.php`: cierre 00:15, tendencias 00:30, vencimiento de pruebas 00:45, cola de correos cada minuto.
 - El promedio móvil se calcula en PHP (sección 5.7) — no depende de la versión de MySQL del hosting.
 - Variables sensibles solo en `.env`. `GEMINI_API_KEY` es opcional (sin ella se desactiva la distribución de comidas con un mensaje, no un 500; el dictado por voz **no** depende de ella desde la sección 5.9); `MAIL_*` hace falta para que salgan los correos del alta (sin SMTP, la única vía es la consola).
 - **Estructura del proyecto en producción: Opción A** (proyecto fuera de `public_html`, con enlaces simbólicos hacia `public/`) — `DEPLOY.md` secciones 2 y 7 detallan el paso de sincronización obligatorio tras cada `git pull`.
@@ -349,3 +394,6 @@ Cubierto por `tests/Unit/NutritionCalculatorServiceTest.php`.
 11. **Toda acción que dependa del proveedor de IA declara `data-cargando`** (sección 5.12): sin señal visible, el usuario vuelve a pulsar y gasta otra llamada.
 12. **En Hostinger, un archivo nuevo en `public/` no llega solo a producción** (sección 5.12/`DEPLOY.md` §7): si una tarea añade algo a `public/`, recuerda el paso de sincronización en el checklist de despliegue.
 13. **El dictado por voz no puede volver a depender del proveedor de IA** (sección 5.9): lo resuelve el reconocedor nativo del navegador. Cualquier camino que mande audio al servidor va detrás de `TRANSCRIPCION_FALLBACK_SERVIDOR`, apagado por defecto — si no, cada dictado se factura y ocupa un worker de PHP-FPM.
+14. **Toda llamada nueva a un proveedor de IA entra por una interfaz de `app/Services/AI` ya envuelta en su decorador de plan** (sección 5.18). No añadas la comprobación de plan en un controlador: si una función de pago necesita un camino nuevo, el corte va en el borde del proveedor, que es el único sitio por el que no se puede pasar de largo.
+15. **Ningún plan puede dejar a nadie fuera de la aplicación** (sección 5.18). El plan quita funciones; quien decide si se entra es `estado` y su middleware. Y ningún cambio de plan borra, oculta ni recalcula datos históricos.
+16. **Un precio no se escribe en una vista** (sección 5.18): vive en `config/planes.php` y se lee por `PlanService::precios()`. Lo que se pueda derivar de otro importe se deriva, no se declara.

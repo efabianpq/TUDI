@@ -2,6 +2,7 @@
 
 use App\Exceptions\TranscripcionNoDisponibleException;
 use App\Services\AI\GeminiTranscripcionProvider;
+use App\Services\AI\PremiumGatedTranscripcionProvider;
 use App\Services\AI\TranscripcionAudioProviderInterface;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -29,8 +30,14 @@ function respuestaDeTranscripcion(string $texto): array
     ];
 }
 
-it('resuelve la interfaz al proveedor de Gemini', function () {
+it('resuelve la interfaz al proveedor de Gemini, envuelto en el control de plan', function () {
+    // El plan B de servidor se factura, así que su proveedor se entrega dentro
+    // del gate de plan (CLAUDE.md sección 5.18). Dictar con el navegador no
+    // pasa por aquí y sigue siendo gratis para cualquier plan.
     expect(app(TranscripcionAudioProviderInterface::class))
+        ->toBeInstanceOf(PremiumGatedTranscripcionProvider::class);
+
+    expect(app(GeminiTranscripcionProvider::class))
         ->toBeInstanceOf(GeminiTranscripcionProvider::class);
 });
 

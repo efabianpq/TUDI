@@ -31,6 +31,25 @@ class MealDistributionUnavailableException extends RuntimeException
         );
     }
 
+    /**
+     * El usuario está en el plan Gratis (CLAUDE.md sección 5.18). No es un
+     * fallo: es la respuesta correcta, y por eso el mensaje explica qué plan
+     * hace falta en vez de disculparse por un error que no ha ocurrido.
+     *
+     * `$pruebaTerminada` distingue "se te acabó la prueba" de "esto nunca
+     * estuvo incluido en tu plan": son dos situaciones distintas para quien lee.
+     */
+    public static function requierePremium(bool $pruebaTerminada = false): self
+    {
+        return new self(
+            $pruebaTerminada
+                ? 'Tu prueba de Premium terminó. Distribuir tus comidas con IA y estimar lo que '.
+                  'comiste son funciones de Premium; el resto de TUDI sigue siendo tuyo, con todo tu historial.'
+                : 'Distribuir tus comidas con IA es parte de Premium. Puedes seguir escribiendo lo que '.
+                  'tienes y registrando tu día en el plan Gratis.'
+        );
+    }
+
     public static function porRespuestaInvalida(string $detalle): self
     {
         return new self(

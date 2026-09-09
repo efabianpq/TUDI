@@ -55,6 +55,18 @@ class DashboardController extends Controller
      */
     private const SEMANAS_SEGUIMIENTO = 6;
 
+    /**
+     * Lo que ve el plan Gratis (CLAUDE.md sección 5.18): la ventana de 7 días,
+     * que es justo lo que la landing promete como gratis para siempre.
+     *
+     * El bloque "Tu tendencia" —promedio móvil, déficit medio, racha— no se
+     * toca: se calcula sobre esa misma ventana de 7 días y es gratis entero. Lo
+     * que se recorta es el historial que va más atrás.
+     */
+    private const DIAS_GRAFICO_GRATIS = 7;
+
+    private const SEMANAS_SEGUIMIENTO_GRATIS = 1;
+
     public function __construct(
         private readonly DailyClosureService $cierre,
         private readonly TrendAnalyticsService $tendencias,
@@ -87,19 +99,35 @@ class DashboardController extends Controller
         // ProgresoController, que ya no existe como pantalla propia.
         $this->tendencias->calcularYPersistir($usuario);
 
+        // El historial largo y las recomendaciones son Premium (sección 5.18).
+        // Lo que se recorta es cuánto se enseña, nunca lo que se guarda: los
+        // datos siguen ahí y vuelven enteros en cuanto haya plan.
+        $premium = $usuario->tienePremium();
+
         return view('dashboard', [
             'registroDiario' => $registroDiario,
             'resumen' => $resumen,
             'errorResumen' => $errorResumen,
             'estadoComidas' => $this->estadoComidas($registroDiario),
             'metricas' => $this->tendencias->calcular($usuario),
-            'serie' => $this->tendencias->serieHistorica($usuario, self::DIAS_GRAFICO),
-            'semanas' => $this->seguimiento->resumenSemanal($usuario, self::SEMANAS_SEGUIMIENTO),
-            'historialRecomendaciones' => $this->seguimiento->historialRecomendaciones($usuario),
-            'recomendacionesPendientes' => RecomendacionSistema::whereHas(
-                'registroDiario',
-                fn ($query) => $query->where('usuario_id', $usuario->id),
-            )->where('estado', 'pendiente')->latest()->get(),
+            'serie' => $this->tendencias->serieHistorica(
+                $usuario,
+                $premium ? self::DIAS_GRAFICO : self::DIAS_GRAFICO_GRATIS,
+            ),
+            'semanas' => $this->seguimiento->resumenSemanal(
+                $usuario,
+                $premium ? self::SEMANAS_SEGUIMIENTO : self::SEMANAS_SEGUIMIENTO_GRATIS,
+            ),
+            'premium' => $premium,
+            'historialRecomendaciones' => $premium
+                ? $this->seguimiento->historialRecomendaciones($usuario)
+                : collect(),
+            'recomendacionesPendientes' => $premium
+                ? RecomendacionSistema::whereHas(
+                    'registroDiario',
+                    fn ($query) => $query->where('usuario_id', $usuario->id),
+                )->where('estado', 'pendiente')->latest()->get()
+                : collect(),
         ]);
     }
 

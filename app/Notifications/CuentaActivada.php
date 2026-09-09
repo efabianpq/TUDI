@@ -26,10 +26,19 @@ class CuentaActivada extends Notification implements ShouldQueue
 
     public function toMail(object $notifiable): MailMessage
     {
-        return (new MailMessage)
+        $correo = (new MailMessage)
             ->subject('Tu cuenta de TUDéficit Inteligente ya está activa')
             ->greeting("¡Hola, {$notifiable->name}!")
-            ->line('Tu cuenta ya está activa. El primer paso es la Calculadora Déficit: con tu peso, tu estatura y cuán activo eres calculamos las calorías que debes consumir cada día.')
+            ->line('Tu cuenta ya está activa. El primer paso es la Calculadora Déficit: con tu peso, tu estatura y cuán activo eres calculamos las calorías que debes consumir cada día.');
+
+        // Quien acaba de registrarse estrena su prueba (sección 5.18); quien
+        // canjeó un código de reactivación puede no tenerla, y entonces esta
+        // línea sobra.
+        if ($dias = $notifiable->diasDePruebaRestantes()) {
+            $correo->line("Tienes {$dias} días de Premium por delante, sin tarjeta: la distribución de tus comidas con IA y la estimación de lo que comes están incluidas. Al terminar pasas solo al plan Gratis y conservas todo tu historial.");
+        }
+
+        return $correo
             ->action('Calcular mi objetivo', route('calculadora.edit'))
             ->salutation('Un saludo, el equipo de TUDéficit Inteligente');
     }

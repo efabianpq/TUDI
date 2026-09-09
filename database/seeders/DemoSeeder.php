@@ -197,14 +197,19 @@ class DemoSeeder extends Seeder
             'email' => 'pendiente'.self::DOMINIO,
             'estado' => User::ESTADO_PENDIENTE,
             'codigo_activacion' => 'DEMO2024',
+            'plan' => User::PLAN_TRIAL,
+            'plan_expira_en' => Carbon::now()->addDays(config('planes.prueba_dias')),
         ]);
 
         // 3. Cuenta activa sin Calculadora: el primer paso del recorrido, con
-        //    todas las pantallas pidiendo que se complete.
+        //    todas las pantallas pidiendo que se complete. Su prueba está a
+        //    punto de vencer, que es cuando el aviso del plan se ve mejor.
         $this->cuenta([
             'name' => 'Carlos Nuevo',
             'email' => 'sin-calculadora'.self::DOMINIO,
             'estado' => User::ESTADO_ACTIVO,
+            'plan' => User::PLAN_TRIAL,
+            'plan_expira_en' => Carbon::now()->addDays(1),
         ]);
 
         /*
@@ -253,7 +258,7 @@ class DemoSeeder extends Seeder
             [
                 ['admin'.self::DOMINIO, 'Administradora · consola y material de apoyo'],
                 ['pendiente'.self::DOMINIO, 'Cuenta pendiente · código DEMO2024'],
-                ['sin-calculadora'.self::DOMINIO, 'Activa sin Calculadora · primer paso'],
+                ['sin-calculadora'.self::DOMINIO, 'Activa sin Calculadora · prueba a 1 día de vencer'],
                 ['en-ritmo'.self::DOMINIO, '21 días · ritmo correcto, sin ajuste'],
                 ['baja-lento'.self::DOMINIO, '21 días · sugiere REDUCIR el objetivo'],
                 ['baja-rapido'.self::DOMINIO, '21 días · sugiere AUMENTAR el objetivo'],
@@ -283,6 +288,14 @@ class DemoSeeder extends Seeder
             'estado' => $datos['estado'] ?? User::ESTADO_ACTIVO,
             'activado_en' => ($datos['estado'] ?? User::ESTADO_ACTIVO) === User::ESTADO_ACTIVO ? now() : null,
             'codigo_activacion' => $datos['codigo_activacion'] ?? null,
+            /*
+             * Premium por defecto (sección 5.18): las tres cuentas con historial
+             * tienen que poder enseñar el motor de recomendaciones, que es lo
+             * que distingue sus tres escenarios. Las que estrenan cuenta llevan
+             * `plan` explícito para enseñar también el aviso de la prueba.
+             */
+            'plan' => $datos['plan'] ?? User::PLAN_PREMIUM,
+            'plan_expira_en' => $datos['plan_expira_en'] ?? null,
         ]);
 
         $usuario->save();

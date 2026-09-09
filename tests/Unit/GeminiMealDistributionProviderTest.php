@@ -3,6 +3,7 @@
 use App\Exceptions\MealDistributionUnavailableException;
 use App\Services\AI\GeminiMealDistributionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
+use App\Services\AI\PremiumGatedMealDistributionProvider;
 use App\Services\MealPlanGeneratorService;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -81,8 +82,15 @@ function contextoDeEjemploGemini(array $fijas = [], array $reservadas = []): arr
     ];
 }
 
-it('resuelve la interfaz al proveedor de Gemini vía el contenedor', function () {
+it('resuelve la interfaz al proveedor de Gemini, envuelto en el control de plan', function () {
+    // El proveedor vigente sigue siendo Gemini, pero no se alcanza en crudo: el
+    // contenedor lo entrega dentro del gate de plan (CLAUDE.md sección 5.18),
+    // que es lo que garantiza que ninguna llamada al proveedor se salte la
+    // comprobación por olvidarse un `if` en un controlador nuevo.
     expect(app(MealDistributionProviderInterface::class))
+        ->toBeInstanceOf(PremiumGatedMealDistributionProvider::class);
+
+    expect(app(GeminiMealDistributionProvider::class))
         ->toBeInstanceOf(GeminiMealDistributionProvider::class);
 });
 

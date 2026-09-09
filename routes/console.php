@@ -28,6 +28,20 @@ Schedule::command('app:run-daily-closure')->dailyAt('00:15');
 Schedule::command('app:calculate-trends')->dailyAt('00:30');
 
 /*
+| Vencimiento de las pruebas de Premium (CLAUDE.md sección 5.18).
+|
+| A las 00:45, DESPUÉS del cierre y de las tendencias: el último día de prueba
+| se cierra —y genera sus recomendaciones, que son Premium— antes de que la
+| cuenta caiga a Gratis. Al revés, quien terminaba la prueba se quedaba sin el
+| cierre completo de un día que sí había pagado con su tiempo.
+|
+| El comando solo ordena la tabla: quién tiene Premium se responde contra el
+| reloj en User::tienePremium(), así que una prueba vencida deja de valer en el
+| acto aunque el cron no haya pasado todavía.
+*/
+Schedule::command('app:expirar-pruebas')->dailyAt('00:45');
+
+/*
 | Vaciado de la cola de correos (CLAUDE.md sección 4.26).
 |
 | Las notificaciones del alta de cuenta van en cola para que el registro no se

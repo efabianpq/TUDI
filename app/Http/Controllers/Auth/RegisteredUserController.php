@@ -42,11 +42,16 @@ class RegisteredUserController extends Controller
         ]);
 
         /*
-         * La cuenta nace pendiente de activación (CLAUDE.md sección 4.26): se
-         * inicia sesión igualmente, pero el middleware `cuenta.activa` la lleva
-         * a la pantalla del código hasta que lo canjee. El código lo entrega el
-         * administrador por fuera de la aplicación, que es la validación manual
-         * de usuarios que pide el negocio.
+         * La cuenta entra directa y con su prueba de Premium ya corriendo
+         * (CLAUDE.md secciones 5.1 y 5.18). No hay pantalla intermedia de
+         * "elige tu plan": los días de prueba (config/planes.php) son el
+         * comportamiento por defecto del registro, no una elección aparte, y el
+         * botón "Probar X días gratis" de la landing es solo el refuerzo visual
+         * de lo que ya va a pasar.
+         *
+         * Va a la Calculadora y no al panel de inicio porque es el primer paso
+         * del flujo (sección 5.2): sin objetivo calórico no hay nada que el
+         * panel pueda enseñarle todavía.
          */
         $user = $this->cuentas->registrar([
             'name' => $request->name,
@@ -58,6 +63,6 @@ class RegisteredUserController extends Controller
 
         Auth::login($user);
 
-        return redirect(route('activacion.create', absolute: false));
+        return redirect(route('calculadora.edit', absolute: false))->with('status', 'prueba-iniciada');
     }
 }

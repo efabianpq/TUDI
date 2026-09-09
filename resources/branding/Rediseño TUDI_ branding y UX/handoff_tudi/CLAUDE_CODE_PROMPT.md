@@ -8,7 +8,8 @@ El diseño ya está aprobado. Tu trabajo es implementarlo, no rediseñarlo. **No
 
 | Archivo | Qué es |
 | --- | --- |
-| `design/TUDI-diseno-oficial.dc.html` | El mockup aprobado. Ábrelo en el navegador: es la referencia visual y de maquetación. Copia de aquí estructura, jerarquía y valores. |
+| `design/TUDI-diseno-oficial.dc.html` | El mockup aprobado de la app (Inicio, Plan diario, Calculadora — móvil y escritorio). Ábrelo en el navegador: es la referencia visual y de maquetación. Copia de aquí estructura, jerarquía y valores. |
+| `design/TUDI-landing-publica.dc.html` | La landing pública aprobada para `tudeficitinteligente.online`. Es la referencia para `resources/views/welcome.blade.php`. |
 | `tokens/tudi-tokens.css` | Los tokens y las clases base (`.tudi-*`). Esta es la única fuente de verdad de color, tipografía, radio y espaciado. |
 
 ## Regla de oro del rediseño
@@ -89,6 +90,21 @@ El objetivo se recalcula en vivo mientras el usuario mueve los controles; el bot
 
 Los checkbox y el textarea largo se reemplazan por un interruptor por comida ("¿Cumpliste con lo sugerido?"). Si el interruptor está en no, se despliega un solo campo: "Cuéntanos qué comiste de verdad…". Botón "Cerrar mi día" y una línea de aviso: "Al cerrar se congelan tus cifras del día."
 
+### 7. Landing pública — `resources/views/welcome.blade.php`
+
+Hoy `GET /` redirige directo a login o dashboard: no hay ninguna página pública. Reemplaza `welcome.blade.php` (el starter de Laravel, sin usar) por la landing de `design/TUDI-landing-publica.dc.html`, y ajusta la ruta raíz para que la sirva a un visitante sin sesión (si ya hay sesión, sigue redirigiendo a `dashboard`).
+
+Secciones, en este orden — cópialas del mockup tal cual, son contenido aprobado, no las reescribas:
+
+1. Nav: isotipo + "Precios" / "Iniciar sesión" / "Crear cuenta gratis".
+2. Hero: "Dile qué tienes. TUDI arma tu día." + anillo de déficit de ejemplo + CTA doble.
+3. Cómo funciona: tres pasos (contar qué tienes → recibir el día completo → cerrar el día).
+4. Diferenciador frente a MyFitnessPal/Yazio/Lifesum.
+5. Precios: Gratis vs. Premium (COP $14.900/mes o $119.000/año, 7 días de prueba sin tarjeta). **La tabla de qué es gratis y qué es Premium debe coincidir exactamente con la sección 5.3 de este documento** (los tres puntos de acceso a la IA) — si cambia el control de acceso, cambia primero esta tabla.
+6. CTA final + footer.
+
+Los botones "Crear cuenta gratis" / "Empieza gratis" enlazan a `register`; "Iniciar sesión" a `login`.
+
 ## Qué NO hacer
 
 - No cambiar la lógica de cálculo, los modelos ni las migraciones. Esto es capa de presentación.
@@ -99,4 +115,8 @@ Los checkbox y el textarea largo se reemplazan por un interruptor por comida ("�
 
 ## Entregable
 
-Un PR por pantalla (base+navegación / inicio / plan diario / calculadora / cierre), con captura de móvil y escritorio en la descripción. Antes de abrirlo, comprueba en cada pantalla: una sola cifra protagonista, ningún párrafo de instrucciones, todo objetivo táctil ≥ 44px, y contraste de texto ≥ 4.5:1.
+Un PR por pantalla (base+navegación / inicio / plan diario / calculadora / cierre / landing), con captura de móvil y escritorio en la descripción. Antes de abrirlo, comprueba en cada pantalla: una sola cifra protagonista, ningún párrafo de instrucciones, todo objetivo táctil ≥ 44px, y contraste de texto ≥ 4.5:1.
+
+## Nota — control de acceso por plan, fuera de este alcance
+
+Este encargo es solo la capa visual. La landing muestra precios y el split Gratis/Premium como contenido, pero **no** implementa cobro ni bloqueo real: eso requiere el modelo de datos de suscripciones, la pasarela de pago (Wompi) y el middleware de acceso por funcionalidad que describe el plan de negocio del proyecto (`suscripciones`, `pagos`, verificación antes de `MealDistributionService`/estimación de consumo/dictado por voz). Si esa fase ya está en marcha, coordínala aparte — no la deduzcas de este documento.

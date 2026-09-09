@@ -26,6 +26,8 @@ use Illuminate\Notifications\Notifiable;
     'estado',
     'codigo_activacion',
     'activado_en',
+    'plan',
+    'plan_expira_en',
     'peso_kg',
     'estatura_m',
     'edad',
@@ -56,6 +58,20 @@ class User extends Authenticatable
     /** Bloqueada por un administrador: conserva sus datos pero no puede entrar. */
     public const ESTADO_SUSPENDIDO = 'suspendido';
 
+    /*
+     * Plan del usuario (CLAUDE.md sección 5.18). Es una dimensión distinta de
+     * `estado`: el plan decide QUÉ funciones tiene, no SI entra. Ningún plan
+     * deja a nadie fuera de la aplicación.
+     */
+
+    /** Sin las funciones que dependen del proveedor de IA. Nunca caduca. */
+    public const PLAN_GRATIS = 'gratis';
+
+    /** Premium completo durante los días de prueba; al vencer, cae a `gratis`. */
+    public const PLAN_TRIAL = 'trial';
+
+    public const PLAN_PREMIUM = 'premium';
+
     /**
      * Get the attributes that should be cast.
      *
@@ -67,6 +83,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'activado_en' => 'datetime',
+            'plan_expira_en' => 'datetime',
             'peso_kg' => 'decimal:2',
             'estatura_m' => 'decimal:2',
             'nivel_actividad' => 'decimal:3',
@@ -104,6 +121,59 @@ class User extends Authenticatable
             'codigo_activacion' => null,
             'activado_en' => now(),
         ])->save();
+    }
+
+    /**
+     * ¿Tiene ahora mismo derecho a las funciones Premium?
+     *
+     * Es la única pregunta que hace el control de acceso, y se responde siempre
+     * contra el reloj: un `trial` cuya fecha ya pasó vale como `gratis` aunque
+     * el cron nocturno todavía no lo haya degradado en la base de datos
+     * (`app:expirar-pruebas`, sección 5.18). Así el vencimiento se nota en el
+     * instante en que ocurre y no a la mañana siguiente, y el comando diario es
+     * solo el que ordena la tabla, no el que decide.
+     */
+    public function tienePremium(): bool
+    {
+        if ($this->plan === self::PLAN_PREMIUM) {
+            // Premium sin fecha es premium indefinido (hoy solo lo pone un
+            // administrador; con pasarela de pago la pondrá la suscripción).
+            return $this->plan_expira_en === null || $this->plan_expira_en->isFuture();
+        }
+
+        return $this->plan === self::PLAN_TRIAL
+            && $this->plan_expira_en !== null
+            && $this->plan_expira_en->isFuture();
+    }
+
+    /**
+     * Dentro de la prueba gratuita. Un Premium pagante no está "de prueba".
+     */
+    public function enPrueba(): bool
+    {
+        return $this->plan === self::PLAN_TRIAL && $this->tienePremium();
+    }
+
+    /**
+     * Días de prueba que le quedan, redondeando hacia arriba: al usuario se le
+     * dice "te quedan 3 días", nunca "te quedan 2,4". Null si no está en prueba.
+     */
+    public function diasDePruebaRestantes(): ?int
+    {
+        if (! $this->enPrueba()) {
+            return null;
+        }
+
+        return max(1, (int) ceil(now()->diffInDays($this->plan_expira_en, absolute: false)));
+    }
+
+    /**
+     * Tuvo prueba y se le acabó. Distingue "se te terminó" de "nunca la
+     * tuviste", que son dos mensajes distintos de cara al usuario.
+     */
+    public function pruebaTerminada(): bool
+    {
+        return $this->plan === self::PLAN_TRIAL && ! $this->tienePremium();
     }
 
     /**

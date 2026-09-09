@@ -249,6 +249,13 @@ class DailyClosureService
      * este método sea correcto tanto si lo llama un cierre en vivo como si lo
      * llama app:run-daily-closure sobre el día de ayer.
      *
+     * El motor de recomendaciones es Premium (CLAUDE.md sección 5.18), y el
+     * corte va aquí —la única puerta por la que RulesEngineService produce algo—
+     * y no en la vista: una recomendación creada y luego escondida seguiría
+     * moviendo el objetivo calórico el día que el usuario volviera a Premium y
+     * la confirmara sin haberla visto nunca. El cierre en sí no es Premium: un
+     * usuario del plan Gratis cierra su día con todas sus cifras.
+     *
      * @param  array{calorias_objetivo: float, calorias_consumidas: float, calorias_actividad_ajustada: float, deficit_diario: float, proteina_objetivo_g: float, proteina_consumida_g: float, grasa_objetivo_g: ?float, grasa_consumida_g: ?float, carbohidratos_objetivo_g: ?float, carbohidratos_consumidos_g: ?float, cumplimiento_proteina_pct: float, recomendaciones: Collection<int, RecomendacionSistema>}  $resumen
      * @return Collection<int, RecomendacionSistema>
      */
@@ -256,6 +263,10 @@ class DailyClosureService
     {
         $usuario = $registroDiario->usuario;
         $recomendaciones = collect();
+
+        if (! $usuario->tienePremium()) {
+            return $recomendaciones;
+        }
 
         $tendencia = $this->analiticaTendencias->calcular($usuario, $registroDiario->fecha);
 
