@@ -2,8 +2,6 @@
 
 use App\Exceptions\TranscripcionNoDisponibleException;
 use App\Services\AI\GeminiTranscripcionProvider;
-use App\Services\AI\PremiumGatedTranscripcionProvider;
-use App\Services\AI\TranscripcionAudioProviderInterface;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -30,13 +28,9 @@ function respuestaDeTranscripcion(string $texto): array
     ];
 }
 
-it('resuelve la interfaz al proveedor de Gemini, envuelto en el control de plan', function () {
-    // El plan B de servidor se factura, así que su proveedor se entrega dentro
-    // del gate de plan (CLAUDE.md sección 5.18). Dictar con el navegador no
-    // pasa por aquí y sigue siendo gratis para cualquier plan.
-    expect(app(TranscripcionAudioProviderInterface::class))
-        ->toBeInstanceOf(PremiumGatedTranscripcionProvider::class);
-
+it('sigue construyéndose aunque ya no sea el proveedor vigente', function () {
+    // Igual que su gemelo de distribución: sustituido por OpenAI, conservado sin
+    // bindear por si hiciera falta volver atrás (CLAUDE.md sección 6).
     expect(app(GeminiTranscripcionProvider::class))
         ->toBeInstanceOf(GeminiTranscripcionProvider::class);
 });

@@ -2,10 +2,10 @@
 
 namespace App\Providers;
 
-use App\Services\AI\GeminiMealDistributionProvider;
-use App\Services\AI\GeminiTranscripcionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\NutritionAiProviderInterface;
+use App\Services\AI\OpenAiMealDistributionProvider;
+use App\Services\AI\OpenAiTranscripcionProvider;
 use App\Services\AI\PremiumGatedMealDistributionProvider;
 use App\Services\AI\PremiumGatedTranscripcionProvider;
 use App\Services\AI\RuleBasedNutritionProvider;
@@ -29,17 +29,19 @@ class AppServiceProvider extends ServiceProvider
 
         // Motor de "Generar distribución" (CLAUDE.md sección 4.12): interpreta
         // el texto libre de ingredientes de cada comida. Mismo criterio que
-        // arriba — cambiar de proveedor es cambiar esta línea. Gemini 2.5
-        // Flash reemplazó a Claude Haiku 4.5 como proveedor vigente.
+        // arriba — cambiar de proveedor es cambiar esta línea. OpenAI (ChatGPT)
+        // reemplazó a Gemini como proveedor vigente por precisión de las
+        // estimaciones; Gemini y Claude siguen en el repo, sin bindear.
         // El proveedor vigente va envuelto en el control de acceso por plan
-        // (CLAUDE.md sección 5.18): la interfaz es el único camino hacia Gemini,
-        // así que envolverla cubre de una vez la distribución de comidas y la
-        // estimación de consumo real, sin un solo `if` en los controladores.
-        // Para cambiar de proveedor se cambia la clase de dentro, no el envoltorio.
+        // (CLAUDE.md sección 5.18): la interfaz es el único camino hacia el
+        // proveedor, así que envolverla cubre de una vez la distribución de
+        // comidas y la estimación de consumo real, sin un solo `if` en los
+        // controladores. Para cambiar de proveedor se cambia la clase de dentro,
+        // no el envoltorio.
         $this->app->bind(
             MealDistributionProviderInterface::class,
             fn ($app) => new PremiumGatedMealDistributionProvider(
-                $app->make(GeminiMealDistributionProvider::class),
+                $app->make(OpenAiMealDistributionProvider::class),
                 $app->make(Auth::class),
             ),
         );
@@ -52,7 +54,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(
             TranscripcionAudioProviderInterface::class,
             fn ($app) => new PremiumGatedTranscripcionProvider(
-                $app->make(GeminiTranscripcionProvider::class),
+                $app->make(OpenAiTranscripcionProvider::class),
                 $app->make(Auth::class),
             ),
         );

@@ -13,9 +13,14 @@ use Illuminate\Support\Facades\Http;
  */
 beforeEach(function () {
     config([
-        'services.gemini.key' => 'clave-de-prueba',
-        'services.gemini.model' => 'gemini-2.5-flash',
-        'services.gemini.endpoint' => 'https://generativelanguage.googleapis.com/v1beta/models',
+        'services.openai.key' => 'clave-de-prueba',
+        'services.openai.model' => 'gpt-4.1',
+        'services.openai.endpoint' => 'https://api.openai.com/v1',
+        // Aquí se prueba el flujo del controlador, no la corrección de macros
+        // del proveedor (que tiene sus propios tests): sin reintentos, cada
+        // "Generar distribución" es exactamente una llamada y las cuentas de
+        // este archivo no dependen de lo cerca que quede el fake del objetivo.
+        'services.openai.reintentos_macros' => 0,
     ]);
 });
 
@@ -48,10 +53,10 @@ function planDiarioDeHoy(User $usuario): RegistroDiario
  * fake sirve para todas las pasadas de un test sin tener que reprogramarlo —
  * `Http::fake()` fusiona los stubs y el primero registrado gana.
  */
-function fingirRespuestaDeGemini(): void
+function fingirRespuestaDeLaIa(): void
 {
-    Http::fake(['generativelanguage.googleapis.com/*' => function ($peticion) {
-        $prompt = $peticion->data()['contents'][0]['parts'][0]['text'];
+    Http::fake(['api.openai.com/*' => function ($peticion) {
+        $prompt = $peticion->data()['messages'][1]['content'];
 
         $tipos = array_values(array_filter(
             ['desayuno', 'almuerzo', 'cena'],
@@ -59,20 +64,24 @@ function fingirRespuestaDeGemini(): void
         ));
 
         return Http::response([
-            'candidates' => [[
-                'content' => ['parts' => [[
-                    'text' => json_encode(['comidas' => array_map(fn (string $tipo): array => [
+            'choices' => [[
+                'index' => 0,
+                'message' => [
+                    'role' => 'assistant',
+                    'refusal' => null,
+                    'content' => json_encode(['comidas' => array_map(fn (string $tipo): array => [
                         'tipo_comida' => $tipo,
                         'descripcion' => "Huevos revueltos con palta ({$tipo})",
                         'preparacion' => 'Revuelve los huevos a fuego bajo.',
                         'notas' => '',
+                        'alimentos_reconocidos' => true,
                         'ingredientes' => [
                             ['nombre' => 'Huevo', 'porcion' => '2 unidades', 'cantidad_g' => 100, 'calorias' => 143, 'proteina_g' => 12.6, 'grasa_g' => 9.5, 'carbohidratos_g' => 0.7],
                             ['nombre' => 'Palta', 'porcion' => 'media unidad', 'cantidad_g' => 70, 'calorias' => 112, 'proteina_g' => 1.4, 'grasa_g' => 10.3, 'carbohidratos_g' => 6.0],
                         ],
                     ], $tipos)]),
-                ]]],
-                'finishReason' => 'STOP',
+                ],
+                'finish_reason' => 'stop',
             ]],
         ]);
     }]);
@@ -215,7 +224,7 @@ test('a user without nutritional parameters is sent to the calculator instead of
 });
 
 test('one single button distributes every meal that has text, in one call', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -255,7 +264,7 @@ test('one single button distributes every meal that has text, in one call', func
 });
 
 test('starting with breakfast and lunch reserves the dinner budget, and adding dinner later only updates dinner', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -270,13 +279,13 @@ test('starting with breakfast and lunch reserves the dinner budget, and adding d
     expect($registroDiario->planesComida()->count())->toBe(2);
 
     // El prompt le dice al modelo que la cena tiene su presupuesto reservado.
-    Http::assertSent(fn ($peticion) => str_contains($peticion->data()['contents'][0]['parts'][0]['text'], 'reservadas')
-        && str_contains($peticion->data()['contents'][0]['parts'][0]['text'], 'cena'));
+    Http::assertSent(fn ($peticion) => str_contains($peticion->data()['messages'][1]['content'], 'TODAVÍA NO HA ESCRITO')
+        && str_contains($peticion->data()['messages'][1]['content'], 'cena'));
 
     $idsDeLaManana = $registroDiario->planesComida()->pluck('id', 'tipo_comida')->all();
 
     // Por la tarde llega la cena: el formulario reenvía los tres textos.
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
 
     $this->actingAs($usuario)->post(route('planes.distribucion', $registroDiario), [
         'ingredientes' => [
@@ -287,8 +296,8 @@ test('starting with breakfast and lunch reserves the dinner budget, and adding d
     ])->assertSessionHasNoErrors();
 
     // Solo se pidió la cena, y el desayuno y el almuerzo son los mismos registros.
-    Http::assertSent(fn ($peticion) => str_contains($peticion->data()['contents'][0]['parts'][0]['text'], '### cena')
-        && ! str_contains($peticion->data()['contents'][0]['parts'][0]['text'], '### desayuno'));
+    Http::assertSent(fn ($peticion) => str_contains($peticion->data()['messages'][1]['content'], '### cena')
+        && ! str_contains($peticion->data()['messages'][1]['content'], '### desayuno'));
 
     expect($registroDiario->planesComida()->count())->toBe(3)
         ->and($registroDiario->planesComida()->pluck('id', 'tipo_comida')->only(['desayuno', 'almuerzo'])->all())
@@ -296,7 +305,7 @@ test('starting with breakfast and lunch reserves the dinner budget, and adding d
 });
 
 test('pressing generate with nothing new comes back with a message instead of calling the provider', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -316,7 +325,7 @@ test('pressing generate with nothing new comes back with a message instead of ca
 });
 
 test('rehacer regenerates just that meal', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -326,7 +335,7 @@ test('rehacer regenerates just that meal', function () {
 
     $idAlmuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->value('id');
 
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
 
     $this->actingAs($usuario)->post(route('planes.distribucion', $registroDiario), [
         'ingredientes' => ['desayuno' => 'dos huevos', 'almuerzo' => 'pollo con arroz'],
@@ -351,7 +360,7 @@ test('an empty ingredients payload is rejected by validation', function () {
 });
 
 test('an unknown meal type in the payload is simply ignored', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -363,7 +372,7 @@ test('an unknown meal type in the payload is simply ignored', function () {
 });
 
 test('a provider failure comes back as a message, not a 500', function () {
-    Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => ['message' => 'overloaded']], 529)]);
+    Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'overloaded']], 529)]);
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 
@@ -456,7 +465,7 @@ test('the suggested activity is derived from the calculator result', function ()
 });
 
 test('closing the day from the plan page comes back to the plan page and freezes it', function () {
-    fingirRespuestaDeGemini();
+    fingirRespuestaDeLaIa();
     $usuario = usuarioDelPlan();
     $registroDiario = planDiarioDeHoy($usuario);
 

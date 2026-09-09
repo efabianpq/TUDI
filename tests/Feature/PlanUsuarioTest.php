@@ -18,9 +18,12 @@ use Illuminate\Support\Facades\Http;
  */
 beforeEach(function () {
     config([
-        'services.gemini.key' => 'clave-de-prueba',
-        'services.gemini.model' => 'gemini-2.5-flash',
-        'services.gemini.endpoint' => 'https://generativelanguage.googleapis.com/v1beta/models',
+        'services.openai.key' => 'clave-de-prueba',
+        'services.openai.model' => 'gpt-4.1',
+        'services.openai.endpoint' => 'https://api.openai.com/v1',
+        // Aquí se prueba el control de acceso por plan, no la corrección de
+        // macros del proveedor (que tiene sus propios tests).
+        'services.openai.reintentos_macros' => 0,
     ]);
 });
 
@@ -169,18 +172,24 @@ it('guarda igualmente lo que el usuario escribió aunque su plan no lo distribuy
 });
 
 it('distribuye con normalidad durante la prueba', function () {
-    Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
-        'candidates' => [[
-            'content' => ['parts' => [['text' => json_encode(['comidas' => [[
-                'tipo_comida' => 'desayuno',
-                'descripcion' => 'Huevos revueltos con palta',
-                'preparacion' => 'Revuelve los huevos a fuego bajo.',
-                'notas' => '',
-                'ingredientes' => [
-                    ['nombre' => 'Huevo', 'porcion' => '2 unidades', 'cantidad_g' => 100, 'calorias' => 143, 'proteina_g' => 12.6, 'grasa_g' => 9.5, 'carbohidratos_g' => 0.7],
-                ],
-            ]]])]]],
-            'finishReason' => 'STOP',
+    Http::fake(['api.openai.com/*' => Http::response([
+        'choices' => [[
+            'index' => 0,
+            'message' => [
+                'role' => 'assistant',
+                'refusal' => null,
+                'content' => json_encode(['comidas' => [[
+                    'tipo_comida' => 'desayuno',
+                    'descripcion' => 'Huevos revueltos con palta',
+                    'preparacion' => 'Revuelve los huevos a fuego bajo.',
+                    'notas' => '',
+                    'alimentos_reconocidos' => true,
+                    'ingredientes' => [
+                        ['nombre' => 'Huevo', 'porcion' => '2 unidades', 'cantidad_g' => 100, 'calorias' => 143, 'proteina_g' => 12.6, 'grasa_g' => 9.5, 'carbohidratos_g' => 0.7],
+                    ],
+                ]]]),
+            ],
+            'finish_reason' => 'stop',
         ]],
     ])]);
 
@@ -252,12 +261,7 @@ it('no transcribe audio en el servidor con el plan Gratis', function () {
 it('transcribe audio en el servidor durante la prueba', function () {
     config(['services.transcripcion.fallback_servidor' => true]);
 
-    Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
-        'candidates' => [[
-            'content' => ['role' => 'model', 'parts' => [['text' => 'dos huevos y media palta']]],
-            'finishReason' => 'STOP',
-        ]],
-    ])]);
+    Http::fake(['api.openai.com/*' => Http::response(['text' => 'dos huevos y media palta'])]);
 
     $usuario = User::factory()->enPrueba(2)->create();
 

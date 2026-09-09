@@ -274,24 +274,30 @@ test('marking a meal as fulfilled registers it with the planned macros', functio
 
 test('describing what was actually eaten is interpreted by the AI and consolidated into the closure', function () {
     config([
-        'services.gemini.key' => 'clave-de-prueba',
-        'services.gemini.model' => 'gemini-2.5-flash',
-        'services.gemini.endpoint' => 'https://generativelanguage.googleapis.com/v1beta/models',
+        'services.openai.key' => 'clave-de-prueba',
+        'services.openai.model' => 'gpt-4.1',
+        'services.openai.endpoint' => 'https://api.openai.com/v1',
     ]);
 
-    Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
-        'candidates' => [[
-            'content' => ['parts' => [['text' => json_encode(['comidas' => [[
-                'tipo_comida' => 'almuerzo',
-                'descripcion' => 'Sándwich de pollo y gaseosa',
-                'preparacion' => '',
-                'notas' => 'Asumí una lata de 350 ml.',
-                'ingredientes' => [
-                    ['nombre' => 'Sándwich de pollo', 'porcion' => '1 unidad', 'cantidad_g' => 220, 'calorias' => 480, 'proteina_g' => 28, 'grasa_g' => 18, 'carbohidratos_g' => 50],
-                    ['nombre' => 'Gaseosa', 'porcion' => '1 lata', 'cantidad_g' => 350, 'calorias' => 140, 'proteina_g' => 0, 'grasa_g' => 0, 'carbohidratos_g' => 37],
-                ],
-            ]]])]]],
-            'finishReason' => 'STOP',
+    Http::fake(['api.openai.com/*' => Http::response([
+        'choices' => [[
+            'index' => 0,
+            'message' => [
+                'role' => 'assistant',
+                'refusal' => null,
+                'content' => json_encode(['comidas' => [[
+                    'tipo_comida' => 'almuerzo',
+                    'descripcion' => 'Sándwich de pollo y gaseosa',
+                    'preparacion' => '',
+                    'notas' => 'Asumí una lata de 350 ml.',
+                    'alimentos_reconocidos' => true,
+                    'ingredientes' => [
+                        ['nombre' => 'Sándwich de pollo', 'porcion' => '1 unidad', 'cantidad_g' => 220, 'calorias' => 480, 'proteina_g' => 28, 'grasa_g' => 18, 'carbohidratos_g' => 50],
+                        ['nombre' => 'Gaseosa', 'porcion' => '1 lata', 'cantidad_g' => 350, 'calorias' => 140, 'proteina_g' => 0, 'grasa_g' => 0, 'carbohidratos_g' => 37],
+                    ],
+                ]]]),
+            ],
+            'finish_reason' => 'stop',
         ]],
     ])]);
 
@@ -318,11 +324,11 @@ test('describing what was actually eaten is interpreted by the AI and consolidat
 
 test('a provider failure during the closure feedback leaves the day open instead of half closed', function () {
     config([
-        'services.gemini.key' => 'clave-de-prueba',
-        'services.gemini.endpoint' => 'https://generativelanguage.googleapis.com/v1beta/models',
+        'services.openai.key' => 'clave-de-prueba',
+        'services.openai.endpoint' => 'https://api.openai.com/v1',
     ]);
 
-    Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => ['message' => 'overloaded']], 529)]);
+    Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'overloaded']], 529)]);
 
     $usuario = usuarioParaCierre();
     $registroDiario = diaDeHoyConDesayunoRegistrado($usuario);

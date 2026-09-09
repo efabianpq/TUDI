@@ -92,7 +92,7 @@ class Diagnostico extends Command
         $this->dato(
             'max_execution_time',
             $ejecucion === 0 ? 'sin límite' : $ejecucion.' s',
-            $ejecucion === 0 || $ejecucion >= (int) config('services.gemini.timeout') + 10,
+            $ejecucion === 0 || $ejecucion >= (int) config('services.openai.presupuesto_total') + 10,
         );
 
         $this->dato('memory_limit', (string) ini_get('memory_limit'));
@@ -218,27 +218,35 @@ class Diagnostico extends Command
     {
         $this->seccion('Proveedor de IA');
 
-        $clave = config('services.gemini.key');
+        $clave = config('services.openai.key');
 
         // Sin clave la aplicación funciona igual: solo se desactiva "Generar
         // distribución" (sección 10). No es crítico.
-        $this->dato('GEMINI_API_KEY', filled($clave) ? 'configurada' : 'sin configurar', filled($clave));
-        $this->dato('GEMINI_MODEL', (string) config('services.gemini.model'));
-        $this->dato('Timeout', config('services.gemini.timeout').' s', (int) config('services.gemini.timeout') <= 25);
+        $this->dato('OPENAI_API_KEY', filled($clave) ? 'configurada' : 'sin configurar', filled($clave));
+        $this->dato('OPENAI_MODEL', (string) config('services.openai.model'));
+        $this->dato('Timeout', config('services.openai.timeout').' s', (int) config('services.openai.timeout') <= 25);
 
-        $endpoint = (string) config('services.gemini.endpoint');
-        $host = parse_url($endpoint, PHP_URL_HOST) ?: 'generativelanguage.googleapis.com';
+        // Techo del conjunto de intentos, incluida la corrección de macros. Si
+        // se sube por encima del timeout del gateway, el 504 lo da el gateway.
+        $this->dato(
+            'Presupuesto total',
+            config('services.openai.presupuesto_total').' s',
+            (int) config('services.openai.presupuesto_total') <= 25,
+        );
+
+        $endpoint = (string) config('services.openai.endpoint');
+        $host = parse_url($endpoint, PHP_URL_HOST) ?: 'api.openai.com';
 
         try {
             $inicio = microtime(true);
-            // Un modelo inexistente vale: lo que se comprueba es que la
-            // petición SALE del servidor, no qué responde. Si el hosting
+            // Da igual qué responda (200 con clave válida, 401 sin ella): lo que
+            // se comprueba es que la petición SALE del servidor. Si el hosting
             // bloquea la salida, aquí se ve en vez de descubrirlo cuando un
             // usuario pulsa el botón y consume el timeout entero.
-            $respuesta = Http::withHeaders(['x-goog-api-key' => (string) $clave])
+            $respuesta = Http::withHeaders(['authorization' => 'Bearer '.((string) $clave)])
                 ->connectTimeout(5)
                 ->timeout(10)
-                ->get(rtrim($endpoint, '/'));
+                ->get(rtrim($endpoint, '/').'/models');
 
             $ms = round((microtime(true) - $inicio) * 1000);
 

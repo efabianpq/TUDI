@@ -5,8 +5,8 @@ namespace App\Exceptions;
 use RuntimeException;
 
 /**
- * El proveedor de distribución de comidas (Gemini 2.5 Flash) no pudo producir
- * una distribución: falta la clave de API, la llamada falló, o la respuesta no
+ * El proveedor de distribución de comidas (OpenAI) no pudo producir una
+ * distribución: falta la clave de API, la llamada falló, o la respuesta no
  * cumplió el contrato esperado.
  *
  * Es una excepción de dominio, no un error de programación: PlanComidaController
@@ -15,7 +15,7 @@ use RuntimeException;
  */
 class MealDistributionUnavailableException extends RuntimeException
 {
-    public static function sinCredenciales(string $variableEnv = 'GEMINI_API_KEY'): self
+    public static function sinCredenciales(string $variableEnv = 'OPENAI_API_KEY'): self
     {
         return new self(
             'La generación de distribuciones con IA no está configurada. '.
