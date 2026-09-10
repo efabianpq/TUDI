@@ -7,7 +7,7 @@ it('sirve la landing pública a un visitante sin sesión', function () {
     // (CLAUDE.md sección 5.19).
     $this->get('/')
         ->assertOk()
-        ->assertSee('Dile qué tienes. TUDI arma tu día.')
+        ->assertSee('Entiende cómo comes. Decide qué hacer con eso.')
         ->assertSee(route('register'));
 });
 

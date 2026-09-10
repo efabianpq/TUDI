@@ -341,8 +341,8 @@ it('enseña los precios de config/planes.php y manda los dos botones al registro
         // El descuento se deriva de los dos importes, no se escribe a mano.
         ->assertSee('33% menos')
         ->assertSee('Crear cuenta gratis')
-        ->assertSee('Probar '.config('planes.prueba_dias').' días gratis')
-        ->assertSee('No se pide tarjeta para registrarte. Cuando abramos el cobro será con tarjeta, PSE o Nequi.');
+        ->assertSee('DISPONIBLE SIN COSTO')
+        ->assertSee('Sin tarjeta para el registro. El cobro de Premium aún no está abierto: por ahora puedes crear tu cuenta y usar todo sin pagar. Te avisaremos antes de activar cualquier cobro.');
 });
 
 it('deriva el precio y el descuento de la configuración, no de la vista', function () {
