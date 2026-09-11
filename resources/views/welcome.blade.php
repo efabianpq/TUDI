@@ -36,8 +36,10 @@
         {{-- ══ Nav ══ --}}
         <header class="sticky top-0 z-10 border-b border-tudi-border bg-tudi-bg pt-[env(safe-area-inset-top)]">
             <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 sm:py-4">
+                {{-- La landing es pública y vende el plan: el sufijo Premium
+                     no pinta nada aquí (sección 5.26). --}}
                 <a href="{{ route('landing') }}" class="text-tudi-ink no-underline">
-                    <x-tudi.marca :size="32" :texto="19" />
+                    <x-tudi.marca :size="32" :texto="19" :premium="false" />
                 </a>
 
                 <nav class="flex items-center gap-1 sm:gap-4">

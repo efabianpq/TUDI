@@ -28,8 +28,10 @@
     <body class="min-h-[100dvh] bg-tudi-bg font-sans text-tudi-ink antialiased">
         {{-- Mismo descuento del safe area que el layout de la app (sección 5.12). --}}
         <div class="flex min-h-[100dvh] flex-col items-center justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+2.5rem)] pt-[calc(env(safe-area-inset-top)+2.5rem)]">
+            {{-- Sin sufijo Premium: login, registro y recuperación no anuncian
+                 el plan de nadie (sección 5.26). --}}
             <a href="/" class="text-tudi-ink no-underline">
-                <x-tudi.marca :size="46" :texto="26" />
+                <x-tudi.marca :size="46" :texto="26" :premium="false" />
             </a>
 
             <p class="tudi-meta mt-3">{{ __('Tu déficit, en un solo número.') }}</p>

@@ -336,7 +336,7 @@ Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada d
 - **El corte de las recomendaciones va en la generación, no en la vista**: una recomendación creada y luego escondida seguiría moviendo `calorias_objetivo` el día que el usuario volviera a Premium y la confirmara sin haberla visto nunca. Cerrar el día **no** es Premium ni cuesta una llamada (sección 5.5): en Gratis se cierra con todas sus cifras, cerrando cada comida por el camino de "cumplí lo sugerido" o repitiendo una frecuente.
 - **Premium tampoco es ilimitado en llamadas**: las dos funciones de arriba tienen además una cuota diaria (sección 5.20). El plan decide qué funciones hay; la cuota, cuántas veces al día se usan.
 - **Precios en un solo sitio**: `config/planes.php` (mensual, anual, días de prueba y qué incluye cada plan). El descuento anual no se declara — `PlanService::precios()` lo deriva de los dos importes para que no pueda contradecirlos. Cuando entre el cobro, el importe cobrado tiene que salir de ese mismo archivo.
-- La interfaz lo dice en una línea y sin bloquear (`x-tudi.plan` en Inicio): días de prueba restantes, o que la prueba terminó y el historial sigue ahí. Un Premium pagante no ve nada.
+- La interfaz lo dice en una línea y sin bloquear (`x-tudi.plan` en Inicio): días de prueba restantes, o que la prueba terminó y el historial sigue ahí. Un Premium pagante no ve ese aviso — lo que sí ve, en toda la aplicación, es el sufijo "Premium" en el logotipo (sección 5.26).
 - **`UserFactory` nace `premium`** por el mismo motivo que nace `activo`: casi ningún test va del cobro. Para eso están `gratis()`, `enPrueba()` y `pruebaVencida()`.
 - **Control manual desde la consola** (sección 5.10): `Admin\UsuarioController::plan()` (`POST /admin/usuarios/{usuario}/plan`) alterna Premium/Gratis con `PlanService::activarPremium()`/`degradarAGratis()` — la manija provisional mientras no exista el cobro. Quitar Premium no toca `estado` ni borra nada.
 - **Pendiente para la siguiente sesión: la pasarela de pago (Wompi).** No hay checkout, ni webhooks, ni facturación, ni forma de pasar a `premium` salvo el botón manual de la consola. La landing anuncia el precio; el botón "Actualizar a Premium" del aviso de plan (`x-tudi.plan`) es a propósito un `<button type="button">` sin acción — se ve como el resto de la interfaz, pero no navega a ningún sitio, porque `tudeficitinteligente.online` va a usarse para pilotos de viabilidad y todavía no hay checkout que ofrecer. En cuanto lo haya, es el único botón que hay que enlazar.
@@ -407,6 +407,23 @@ Antes, cualquier día abierto derivaba sus objetivos del perfil actual: tocar la
 - **Quién lee:** `vigente()` es el único punto por el que `MealDistributionService::objetivosDelRegistro()` y `DailyClosureService::calcular()` obtienen el objetivo de un día. Para un **día heredado sin sello** —los que ya existían— cae al perfil vigente, que es exactamente el comportamiento anterior: no se puede inventar un objetivo que nunca se guardó.
 - **Sellar es oportunista, nunca un requisito:** si el perfil todavía no permite calcular (parámetros a medias, o macros que no caben), no se sella y no se lanza — el día se crea igual y se resuelve como uno heredado.
 - `objetivosDelDia(User)` sigue existiendo para cuando hay usuario pero todavía no hay día (la sugerencia de actividad, la Calculadora).
+
+### 5.26 El logotipo dice el plan: "tudi Premium"
+
+`x-tudi.marca`. Con el plan Premium en vigor, el logotipo de la esquina superior izquierda gana el sufijo **"Premium"** a su derecha, al modo de YouTube: **el logotipo no cambia**, se le añade la palabra en el color de acento. Nunca al revés, nunca en otro color, nunca sin el logotipo — y **ni corona, ni estrella, ni brillo, ni degradado**: el sufijo es la única señal.
+
+- **Quién lo decide:** el propio componente, por defecto, con `auth()->user()?->tienePremium()`. Como esa comprobación se resuelve contra el reloj y sobre columnas ya cargadas (sección 5.18), no cuesta una consulta y **el cambio se ve en la siguiente navegación**, sin esperar a un nuevo login. Una prueba en curso cuenta como Premium; una vencida deja de contar en el mismo instante, aunque el cron nocturno todavía no la haya degradado.
+- **Dónde NO aparece:** landing pública y pantallas de invitado (login, registro, recuperación) pasan `:premium="false"` a mano. Ahí no se anuncia el plan de nadie, y la landing además está vendiéndolo.
+- **Color:** `var(--tudi-lime-700)` sobre crema — la única lima con contraste (regla 8). Sobre un panel carbón se pasa `premiumColor="var(--tudi-lime)"`. Hoy ninguna marca vive sobre oscuro, pero el prop existe porque el handoff trae esa variante.
+- **Proporción:** el sufijo va al 62.5% del tamaño del logotipo y sobre su misma línea base, como en `logo/tudi-logo-premium.svg` (24px / 15px). Por eso `x-tudi.marca` alinea por `items-baseline` y centra el isotipo aparte: un isotipo no tiene línea base propia.
+
+**Por qué no se usan los SVG del handoff tal cual.** `resources/branding/.../handoff_tudi/logo/` trae cinco SVG y un README que propone copiarlos a `public/img/brand/` y servirlos con `<img>`. Aquí se implementa **en línea**, reutilizando `x-tudi.isotipo`, por tres razones concretas:
+
+1. **La fuente no cargaría.** Los SVG dibujan el logotipo con `<text>` en Instrument Sans; un SVG referenciado con `<img>` no ve las fuentes de la página, así que "tudi" saldría en la tipografía de sistema y no casaría con el resto de la interfaz.
+2. **Cada archivo nuevo en `public/` cuesta un paso de despliegue** (regla 12 y `DEPLOY.md` §7): cinco SVG son cinco enlaces simbólicos que sincronizar a mano tras cada `git pull`.
+3. **El isotipo ya existe y es el mismo dibujo**: `x-tudi.isotipo` pinta el anillo con `conic-gradient` a 252° = 70%, exactamente el `stroke-dasharray="43.98 62.83"` del SVG. Duplicarlo abriría la puerta a que las dos versiones se separen.
+
+Los SVG se conservan en `resources/branding/` como fuente de verdad del diseño (y para correos, PDF o cualquier contexto sin la fuente cargada, convertidos a trazos).
 
 ## 6. Rutas y código sin usar, conservados a propósito
 
