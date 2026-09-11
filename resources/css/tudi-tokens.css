@@ -186,6 +186,15 @@ a:hover { color: var(--tudi-lime-700); }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 
+/*
+ * Variante compacta (Inicio, sección 5.8): el anillo deja de ser la cifra
+ * protagonista y pasa a ser el indicador que acompaña a "Te quedan X kcal",
+ * con el porcentaje dentro. Mismo grosor de aro relativo, solo cambia el
+ * diámetro — no es un componente nuevo, es el mismo a otra escala.
+ */
+.tudi-ring-sm { width: 76px; }
+.tudi-ring-sm > * { width: 78%; font-size: 14px; }
+
 /* Barra de macro  ·  --pct = 0..100 */
 .tudi-bar { height: 6px; border-radius: var(--tudi-r-pill); background: var(--tudi-dark-4); overflow: hidden; }
 .tudi-bar > span { display: block; height: 100%; width: calc(var(--pct, 0) * 1%); background: var(--tudi-lime); }

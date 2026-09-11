@@ -6,7 +6,7 @@
 --}}
 @php
     $kcal = fn ($valor) => number_format((float) $valor, 0, ',', '.');
-    $comidasRegistradas = collect($hoy['estadoComidas'])->where('estado', 'registrada')->count();
+    $gramos = fn ($valor) => number_format((float) $valor, 0, ',', '.');
 @endphp
 
 @if ($hoy['estado'] === 'error')
@@ -46,15 +46,16 @@
     </div>
 @else
     {{--
-        Día en curso: el mismo anillo de progreso y las mismas cifras que ya
-        vivían aquí, pero la cifra protagonista ahora es "lo que queda"
-        (MealDistributionService::saldoDelDia, sección 5.21) y no un
-        "déficit" — ese sustantivo de resultado solo se gana una vez el día
-        se cierra (sección 5.8, requisito transversal).
+        Día en curso. El anillo pasa a ser un indicador compacto con su
+        porcentaje dentro, y la cifra protagonista es la accionable: lo que
+        QUEDA del día (MealDistributionService::saldoDelDia, sección 5.21).
+        "Déficit" es un sustantivo de resultado y solo se gana con el día
+        cerrado (sección 5.8, regla transversal de honestidad).
     --}}
     @php
         $resumen = $hoy['resumen'];
         $saldo = $hoy['saldo'];
+
         $presupuesto = (float) $resumen['calorias_objetivo'] + (float) $resumen['calorias_actividad_ajustada'];
         $avance = $presupuesto > 0
             ? max(0, min(100, round((float) $resumen['calorias_consumidas'] / $presupuesto * 100)))
@@ -67,89 +68,82 @@
                 : $lista->first());
     @endphp
 
-    <section class="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start">
-        <div class="tudi-panel on-dark">
-            <div class="flex flex-col items-center gap-6 lg:flex-row lg:items-center lg:gap-7">
-                <div class="tudi-ring lg:tudi-ring-sm flex-none" style="--pct: {{ $avance }}">
-                    <div>
-                        <span class="tudi-label">
-                            {{ $saldo['agotado'] ? __('Te pasaste por') : __('Te quedan') }}
-                        </span>
-                        <span @class([
-                            'tudi-num text-[54px] lg:text-[46px]',
-                            'text-tudi-lime' => ! $saldo['agotado'],
-                            'text-tudi-amber' => $saldo['agotado'],
-                        ])>{{ $kcal(abs($saldo['saldo']['calorias'])) }}</span>
-                        <span class="tudi-meta">
-                            kcal
-                            @if ($pendientesLegible)
-                                {{ __('para') }} {{ $pendientesLegible }}
-                            @endif
-                        </span>
-                    </div>
-                </div>
-
-                <div class="w-full min-w-0 text-center lg:w-auto lg:text-start">
-                    <p class="text-sm text-tudi-on-dark-2">
-                        {{ $kcal($resumen['calorias_consumidas']) }} {{ __('consumidas') }}
-                        <span class="hidden lg:inline">· {{ $kcal($resumen['calorias_actividad_ajustada']) }} {{ __('quemadas en actividad') }}</span>
-                        · {{ $kcal($resumen['calorias_objetivo']) }} {{ __('objetivo') }}
-                    </p>
-
-                    <div class="mt-4 grid grid-cols-2 gap-2.5">
-                        <div class="tudi-panel-tile text-start">
-                            <p class="tudi-label">{{ __('Actividad') }}</p>
-                            <p class="tudi-num mt-1 text-xl text-tudi-on-dark">{{ $kcal($resumen['calorias_actividad_ajustada']) }} kcal</p>
-                        </div>
-                        <div class="tudi-panel-tile text-start">
-                            <p class="tudi-label">{{ __('Proteína') }}</p>
-                            <p class="tudi-num mt-1 text-xl text-tudi-on-dark">{{ number_format($resumen['cumplimiento_proteina_pct'], 1, ',', '.') }}%</p>
-                            <div class="tudi-bar mt-2" style="--pct: {{ $proteinaPct }}"><span></span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <div class="tudi-panel on-dark">
+        <div class="flex items-center justify-between gap-3">
+            <span class="tudi-label">{{ __('Hoy') }}</span>
+            <span class="tudi-meta">
+                {{ $kcal($resumen['calorias_consumidas']) }} / {{ $kcal($resumen['calorias_objetivo']) }} kcal
+                @if ($resumen['calorias_actividad_ajustada'] > 0)
+                    · {{ $kcal($resumen['calorias_actividad_ajustada']) }} {{ __('en actividad') }}
+                @endif
+            </span>
         </div>
 
-        {{--
-            Comidas: sobre el panel carbón en móvil (una sola superficie de
-            dato) y sobre tarjeta crema en escritorio.
-        --}}
-        <div class="rounded-tudi-xl bg-tudi-dark p-5 lg:border lg:border-tudi-border lg:bg-tudi-card lg:p-6">
-            <div class="flex items-center justify-between">
-                <span class="tudi-label text-tudi-on-dark-3 lg:text-tudi-muted">{{ __('Comidas') }}</span>
-                <span class="tudi-meta text-tudi-lime lg:text-tudi-lime-700">
-                    {{ $comidasRegistradas }} / {{ count($hoy['estadoComidas']) }}
-                </span>
+        {{-- Móvil: apilado. sm+: el anillo y la cifra a un lado, el progreso al otro. --}}
+        <div class="mt-4 sm:flex sm:items-center sm:gap-8">
+            <div class="flex items-center gap-4 sm:flex-none">
+                <div class="tudi-ring tudi-ring-sm flex-none" style="--pct: {{ $avance }}">
+                    <div>
+                        <span class="tudi-num text-tudi-on-dark">{{ $avance }}%</span>
+                    </div>
+                </div>
+
+                <div class="min-w-0">
+                    <p @class([
+                        'text-[22px] font-semibold leading-tight tracking-tudi-title',
+                        'text-tudi-on-dark' => ! $saldo['agotado'],
+                        'text-tudi-amber' => $saldo['agotado'],
+                    ])>
+                        {{ $saldo['agotado'] ? __('Te pasaste por') : __('Te quedan') }}
+                        <span class="tudi-num">{{ $kcal(abs($saldo['saldo']['calorias'])) }}</span> kcal
+                    </p>
+                    @if ($pendientesLegible)
+                        <p class="tudi-meta mt-0.5">{{ __('para') }} {{ $pendientesLegible }}</p>
+                    @endif
+                </div>
             </div>
 
-            <ul class="mt-3 space-y-1.5">
-                @foreach ($hoy['estadoComidas'] as $comida)
-                    @php
-                        $plan = $comida['planComida'];
-                        $kcalComida = $plan?->comidaReal?->calorias_reales ?? $plan?->calorias_estimadas;
-                    @endphp
-                    <li class="flex items-center gap-3 rounded-tudi-sm bg-tudi-dark-2 px-4 py-3 lg:rounded-tudi-pill lg:bg-tudi-card-inset">
+            <div class="mt-5 sm:mt-0 sm:flex-1">
+                <div class="flex items-baseline justify-between gap-2">
+                    <x-tudi.macro tipo="proteina" variante="palabra" class="tudi-label" />
+                    <span class="tudi-meta text-tudi-on-dark">
+                        {{ $gramos($resumen['proteina_consumida_g']) }} / {{ $gramos($resumen['proteina_objetivo_g']) }} g
+                    </span>
+                </div>
+                <span class="tudi-bar mt-2 block" style="--pct: {{ $proteinaPct }}"><span></span></span>
+
+                {{--
+                    Las comidas pasan de una tarjeta propia con su lista a tres
+                    chips en línea: el estado de cada una es un sí/no, y una
+                    fila de chips lo dice en el mismo golpe de vista que la
+                    cifra de arriba sin ocupar media pantalla.
+                --}}
+                <div class="mt-4 flex flex-wrap gap-2">
+                    @foreach ($hoy['estadoComidas'] as $comida)
                         <span @class([
-                            'h-[18px] w-[18px] flex-none rounded-full',
-                            'bg-tudi-lime' => $comida['estado'] === 'registrada',
-                            'bg-tudi-dark-4 lg:bg-tudi-input-border' => $comida['estado'] !== 'registrada',
-                        ])></span>
-                        <span class="flex-1 text-[15px] capitalize text-tudi-on-dark lg:font-semibold lg:text-tudi-ink">
+                            'tudi-chip gap-1.5 capitalize',
+                            'bg-tudi-dark-2 text-tudi-lime' => $comida['estado'] === 'registrada',
+                            'bg-tudi-dark-2 text-tudi-on-dark' => $comida['estado'] === 'planificada',
+                            'bg-tudi-dark-2 text-tudi-on-dark-3' => $comida['estado'] === 'pendiente',
+                        ])>
+                            @if ($comida['estado'] === 'registrada')
+                                <svg class="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor"
+                                     stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7" />
+                                </svg>
+                            @endif
                             {{ $comida['tipo'] }}
+                            {{-- El estado lo lleva el color: aquí queda para lectores de pantalla. --}}
                             <span class="sr-only">{{ __($comida['estado']) }}</span>
                         </span>
-                        <span class="tudi-meta text-tudi-on-dark-3 lg:text-tudi-muted">
-                            {{ $kcalComida === null ? '—' : $kcal($kcalComida) }}
-                        </span>
-                    </li>
-                @endforeach
-            </ul>
-
-            <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
-               class="tudi-btn tudi-btn-block mt-4 bg-tudi-lime text-tudi-ink no-underline hover:bg-tudi-lime-600 lg:bg-tudi-ink lg:text-tudi-on-dark">
-                {{ __('Abrir el plan de hoy') }}
-            </a>
+                    @endforeach
+                </div>
+            </div>
         </div>
-    </section>
+
+        <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
+           class="tudi-btn tudi-btn-lime tudi-btn-block mt-5 no-underline">
+            {{ __('Abrir el plan de hoy') }}
+        </a>
+    </div>
 @endif

@@ -196,8 +196,8 @@ it('Tu tendencia: con menos de 7 días muestra el checklist, nunca un gráfico v
         ->assertOk()
         ->assertSee('Todavía no hay historial suficiente para sugerirte un ajuste.')
         ->assertSee('Días con plan en la última semana')
-        ->assertDontSee('grafico-peso')
-        ->assertDontSee('Racha');
+        ->assertDontSee('Último peso registrado')
+        ->assertDontSee('Racha de días cerrados');
 });
 
 it('Tu tendencia: con 7 días muestra el último peso real y el promedio, por separado', function () {
@@ -215,14 +215,14 @@ it('Tu tendencia: con 7 días muestra el último peso real y el promedio, por se
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
         ->assertSee('Último peso registrado')
-        ->assertSee('Tendencia · media 7 días')
+        ->assertSee('Tendencia 7 días')
         ->assertSee('80,00 kg')
+        ->assertSee('no es tu peso de hoy')
         ->assertSee('Déficit promedio')
-        ->assertSee('Racha')
-        ->assertSee('7 de 7 días cerrados')
-        ->assertSee('grafico-peso')
-        ->assertSee('grafico-peso-real')
-        ->assertSee('chart.js', false);
+        ->assertSee('Racha de días cerrados')
+        // El sparkline se dibuja en el servidor: ni Chart.js ni CDN.
+        ->assertSee('<polyline', false)
+        ->assertDontSee('chart.js', false);
 });
 
 it('muestra la racha de días seguidos cerrados', function () {
@@ -243,7 +243,8 @@ it('muestra la racha de días seguidos cerrados', function () {
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
         ->assertViewHas('tendencia', fn ($tendencia) => $tendencia['suficiente'] === true && $tendencia['racha'] === 3)
-        ->assertSee('días seguidos');
+        ->assertSee('Racha de días cerrados')
+        ->assertSee('3 días');
 });
 
 /*
