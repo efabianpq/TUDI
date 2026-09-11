@@ -1,0 +1,307 @@
+/*
+    Tema de los correos transaccionales, alineado con el sistema visual TUDI
+    (resources/css/tudi-tokens.css, CLAUDE.md sección 5.12): fondo crema, texto
+    carbón, sin rojo en la paleta (el nivel "error" usa ámbar) y la lima
+    reservada para progreso, así que no aparece aquí.
+*/
+
+/* Base */
+
+body,
+body *:not(html):not(style):not(br):not(tr):not(code) {
+    box-sizing: border-box;
+    font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+    position: relative;
+}
+
+body {
+    -webkit-text-size-adjust: none;
+    background-color: #EFE9DE;
+    color: #3A362F;
+    height: 100%;
+    line-height: 1.4;
+    margin: 0;
+    padding: 0;
+    width: 100% !important;
+}
+
+p,
+ul,
+ol,
+blockquote {
+    line-height: 1.4;
+    text-align: start;
+}
+
+a {
+    color: #171512;
+}
+
+a img {
+    border: none;
+}
+
+/* Typography */
+
+h1 {
+    color: #171512;
+    font-size: 18px;
+    font-weight: bold;
+    margin-top: 0;
+    text-align: start;
+}
+
+h2 {
+    color: #171512;
+    font-size: 16px;
+    font-weight: bold;
+    margin-top: 0;
+    text-align: start;
+}
+
+h3 {
+    color: #171512;
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: 0;
+    text-align: left;
+}
+
+p {
+    font-size: 16px;
+    line-height: 1.5em;
+    margin-top: 0;
+    text-align: left;
+}
+
+p.sub {
+    font-size: 12px;
+}
+
+img {
+    max-width: 100%;
+}
+
+/* Layout */
+
+.wrapper {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    background-color: #EFE9DE;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
+.content {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
+/* Header */
+
+.header {
+    padding: 25px 0;
+    text-align: center;
+}
+
+.header a {
+    color: #171512;
+    font-size: 19px;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+/* Logo */
+
+.logo {
+    height: 75px;
+    margin-top: 15px;
+    margin-bottom: 10px;
+    max-height: 75px;
+    width: 75px;
+}
+
+/* Body */
+
+.body {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    background-color: #EFE9DE;
+    border-bottom: 1px solid #EFE9DE;
+    border-top: 1px solid #EFE9DE;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
+.inner-body {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 570px;
+    background-color: #FFFDF8;
+    border-color: #DED7C8;
+    border-radius: 16px;
+    border-width: 1px;
+    box-shadow: 0 1px 3px 0 rgba(23, 21, 18, 0.08), 0 1px 2px -1px rgba(23, 21, 18, 0.08);
+    margin: 0 auto;
+    padding: 0;
+    width: 570px;
+}
+
+.inner-body a {
+    word-break: break-all;
+}
+
+/* Subcopy */
+
+.subcopy {
+    border-top: 1px solid #E4DCCC;
+    margin-top: 25px;
+    padding-top: 25px;
+}
+
+.subcopy p {
+    color: #6B665C;
+    font-size: 14px;
+}
+
+/* Footer */
+
+.footer {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 570px;
+    margin: 0 auto;
+    padding: 0;
+    text-align: center;
+    width: 570px;
+}
+
+.footer p {
+    color: #6B665C;
+    font-size: 12px;
+    text-align: center;
+}
+
+.footer a {
+    color: #6B665C;
+    text-decoration: underline;
+}
+
+/* Tables */
+
+.table table {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    margin: 30px auto;
+    width: 100%;
+}
+
+.table th {
+    border-bottom: 1px solid #DED7C8;
+    margin: 0;
+    padding-bottom: 8px;
+}
+
+.table td {
+    color: #3A362F;
+    font-size: 15px;
+    line-height: 18px;
+    margin: 0;
+    padding: 10px 0;
+}
+
+.content-cell {
+    max-width: 100vw;
+    padding: 32px;
+}
+
+/* Buttons */
+
+.action {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    margin: 30px auto;
+    padding: 0;
+    text-align: center;
+    width: 100%;
+    float: unset;
+}
+
+.button {
+    -webkit-text-size-adjust: none;
+    border-radius: 999px;
+    color: #EFE9DE;
+    display: inline-block;
+    overflow: hidden;
+    text-decoration: none;
+}
+
+/*
+    Un solo color de botón, el mismo negro (tudi-ink) que tudi-btn-primary en
+    la interfaz — la lima es progreso y nada más (CLAUDE.md regla 8) y en la
+    paleta no hay rojo, así que el nivel "error" usa el ámbar de avisos en vez
+    de un rojo que no existe en ningún otro sitio de la app.
+*/
+.button-blue,
+.button-primary,
+.button-green,
+.button-success {
+    background-color: #171512;
+    border-bottom: 8px solid #171512;
+    border-left: 18px solid #171512;
+    border-right: 18px solid #171512;
+    border-top: 8px solid #171512;
+}
+
+.button-red,
+.button-error {
+    background-color: #E8A33D;
+    border-bottom: 8px solid #E8A33D;
+    border-left: 18px solid #E8A33D;
+    border-right: 18px solid #E8A33D;
+    border-top: 8px solid #E8A33D;
+    color: #171512;
+}
+
+/* Panels */
+
+.panel {
+    border-left: #171512 solid 4px;
+    margin: 21px 0;
+}
+
+.panel-content {
+    background-color: #F3EEE4;
+    color: #3A362F;
+    padding: 16px;
+}
+
+.panel-content p {
+    color: #3A362F;
+}
+
+.panel-item {
+    padding: 0;
+}
+
+.panel-item p:last-of-type {
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+/* Utilities */
+
+.break-all {
+    word-break: break-all;
+}

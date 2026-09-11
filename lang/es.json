@@ -16,6 +16,7 @@
     "Ensure your account is using a long, random password to stay secure.": "Usa una contraseña larga y difícil de adivinar para mantener tu cuenta segura.",
     "Forgot your password?": "¿Olvidaste tu contraseña?",
     "Forgot your password? No problem. Just let us know your email address and we will email you a password reset link that will allow you to choose a new one.": "¿Olvidaste tu contraseña? No pasa nada. Dinos tu correo y te enviamos un enlace para elegir una nueva.",
+    "If you did not request a password reset, no further action is required.": "Si no pediste cambiar tu contraseña, no tienes que hacer nada más.",
     "Log in": "Iniciar sesión",
     "Log Out": "Cerrar sesión",
     "Name": "Nombre",
@@ -29,11 +30,14 @@
     "Remember me": "Mantener la sesión abierta",
     "Resend Verification Email": "Reenviar el correo de verificación",
     "Reset Password": "Cambiar la contraseña",
+    "Reset your password": "Cambia tu contraseña",
     "Save": "Guardar",
     "Saved.": "Guardado.",
     "This is a secure area of the application. Please confirm your password before continuing.": "Esta es una zona protegida de la aplicación. Confirma tu contraseña para continuar.",
+    "This password reset link will expire in :count minutes.": "Este enlace para cambiar la contraseña vence en :count minutos.",
     "Update Password": "Cambiar la contraseña",
     "Update your account's profile information and email address.": "Actualiza tu nombre y tu correo.",
     "Verify Email Address": "Verifica tu correo",
+    "You are receiving this email because we received a password reset request for your account.": "Recibes este correo porque pedimos cambiar la contraseña de tu cuenta.",
     "Your email address is unverified.": "Tu correo todavía no está verificado."
 }
