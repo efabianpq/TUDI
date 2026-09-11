@@ -1,0 +1,239 @@
+/* ============================================================
+   TUDI — tokens de diseño (versión Oficial)
+   tudeficitinteligente.online
+   Extraídos del mockup "TUDI Branding y Rediseño Oficial".
+   Cárgalo antes de cualquier otro CSS de la app.
+   ============================================================ */
+
+:root {
+  /* ---------- Fondos claros ---------- */
+  --tudi-bg:            #EFE9DE; /* crema tostada — fondo de app */
+  --tudi-surface:       #E2DACB; /* arena — chips, barras vacías, divisores suaves */
+  --tudi-card:          #FFFDF8; /* tarjeta elevada */
+  --tudi-card-inset:    #F3EEE4; /* zona interna de tarjeta (detalle de comida) */
+  --tudi-border:        #DED7C8; /* borde de tarjeta */
+  --tudi-divider:       #E4DCCC; /* separador dentro de tarjeta */
+  --tudi-input-border:  #CFC6B4;
+
+  /* ---------- Tinta sobre claro ---------- */
+  --tudi-ink:           #171512; /* carbón — texto principal */
+  --tudi-ink-2:         #3A362F; /* texto secundario */
+  --tudi-ink-3:         #4A463E; /* párrafos largos */
+  --tudi-muted:         #6B665C; /* etiquetas, metadatos */
+
+  /* ---------- Superficies oscuras (paneles de dato) ---------- */
+  --tudi-dark:          #171512; /* panel protagonista */
+  --tudi-dark-2:        #221F1A; /* tarjeta dentro del panel oscuro */
+  --tudi-dark-3:        #2A2721; /* pista de anillo / borde interno */
+  --tudi-dark-4:        #3A362F; /* pista de barra, iconos inactivos */
+  --tudi-on-dark:       #EFE9DE; /* texto sobre oscuro */
+  --tudi-on-dark-2:     #A8A296; /* texto secundario sobre oscuro */
+  --tudi-on-dark-3:     #8C8578; /* etiquetas sobre oscuro */
+
+  /* ---------- Acento: lima = progreso, SOLO progreso ---------- */
+  --tudi-lime:          #C8F03C;
+  --tudi-lime-600:      #AFD62F; /* hover */
+  --tudi-lime-700:      #5C6B14; /* enlaces y texto lima sobre crema (contraste) */
+  --tudi-lime-800:      #4C5A12;
+  --tudi-lime-900:      #3E4A0E;
+
+  /* ---------- Ámbar: aviso / ajuste sugerido ---------- */
+  --tudi-amber:         #E8A33D;
+  --tudi-amber-bg:      #FBF1DE;
+  --tudi-amber-ink:     #7A5A16;
+
+  /* ---------- Tipografía ---------- */
+  --tudi-font-sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+  --tudi-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Cifras y titulares: Instrument Sans 600, tracking negativo */
+  --tudi-tracking-display: -0.045em;
+  --tudi-tracking-title:   -0.03em;
+  --tudi-tracking-label:    0.14em; /* mono en mayúsculas */
+
+  /* ---------- Radios ---------- */
+  --tudi-r-sm:   12px;
+  --tudi-r-md:   16px;
+  --tudi-r-lg:   20px;
+  --tudi-r-xl:   24px;
+  --tudi-r-pill: 999px;
+
+  /* ---------- Espaciado (múltiplos de 4) ---------- */
+  --tudi-s-1: 4px;  --tudi-s-2: 8px;  --tudi-s-3: 12px;
+  --tudi-s-4: 16px; --tudi-s-5: 20px; --tudi-s-6: 24px;
+  --tudi-s-8: 32px; --tudi-s-10: 40px;
+
+  /* ---------- Sombras ---------- */
+  --tudi-shadow-sm: 0 1px 2px rgba(23,21,18,0.06);
+  --tudi-shadow-md: 0 6px 18px rgba(23,21,18,0.10);
+  --tudi-shadow-lg: 0 24px 60px rgba(23,21,18,0.18);
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+
+body {
+  margin: 0;
+  background: var(--tudi-bg);
+  color: var(--tudi-ink);
+  font-family: var(--tudi-font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: var(--tudi-tracking-title); line-height: 1.15; }
+h1 { font-size: clamp(32px, 5vw, 56px); letter-spacing: var(--tudi-tracking-display); line-height: 1.02; }
+h2 { font-size: 28px; }
+h3 { font-size: 21px; }
+h4 { font-size: 17px; }
+p  { margin: 0; text-wrap: pretty; }
+
+a { color: var(--tudi-ink); text-decoration: underline; text-underline-offset: 3px; }
+a:hover { color: var(--tudi-lime-700); }
+
+:focus-visible { outline: 2px solid var(--tudi-lime-700); outline-offset: 2px; }
+::selection { background: var(--tudi-lime); color: var(--tudi-ink); }
+
+/* ============================================================
+   Utilidades tipográficas
+   ============================================================ */
+
+.tudi-num    { font-weight: 600; letter-spacing: var(--tudi-tracking-display); line-height: 1.05; font-variant-numeric: tabular-nums; }
+.tudi-label  { font-family: var(--tudi-font-mono); font-size: 10px; letter-spacing: var(--tudi-tracking-label);
+               text-transform: uppercase; color: var(--tudi-muted); }
+.tudi-meta   { font-family: var(--tudi-font-mono); font-size: 12px; color: var(--tudi-muted); }
+.tudi-muted  { color: var(--tudi-muted); }
+.on-dark .tudi-label,
+.on-dark .tudi-meta { color: var(--tudi-on-dark-3); }
+
+/* ============================================================
+   Botones
+   ============================================================ */
+
+.tudi-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--tudi-s-2);
+  min-height: 48px; padding: 0 var(--tudi-s-6);
+  border: 0; border-radius: var(--tudi-r-md);
+  font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
+  cursor: pointer; transition: background .15s ease, color .15s ease;
+}
+.tudi-btn-block { width: 100%; }
+
+/* Primario sobre fondo CLARO: carbón. La lima no se usa como relleno de botón sobre crema. */
+.tudi-btn-primary { background: var(--tudi-ink); color: var(--tudi-on-dark); }
+.tudi-btn-primary:hover  { background: #262219; }
+.tudi-btn-primary:active { background: #0F0E0C; }
+
+/* Primario sobre fondo OSCURO: lima con tinta carbón. */
+.on-dark .tudi-btn-primary,
+.tudi-btn-lime { background: var(--tudi-lime); color: var(--tudi-ink); }
+.tudi-btn-lime:hover  { background: var(--tudi-lime-600); }
+.tudi-btn-lime:active { background: var(--tudi-lime-700); color: #FFFDF8; }
+
+.tudi-btn-secondary { background: transparent; color: var(--tudi-ink-2); border: 1px solid var(--tudi-input-border); }
+.tudi-btn-secondary:hover { background: var(--tudi-surface); }
+
+.tudi-btn-ghost { background: transparent; color: var(--tudi-ink-2); }
+.tudi-btn-ghost:hover { background: var(--tudi-surface); }
+
+.tudi-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ============================================================
+   Tarjetas y contenedores
+   ============================================================ */
+
+.tudi-card {
+  background: var(--tudi-card); border: 1px solid var(--tudi-border);
+  border-radius: var(--tudi-r-lg); overflow: hidden;
+}
+.tudi-card-inset { background: var(--tudi-card-inset); border-top: 1px solid var(--tudi-surface); padding: var(--tudi-s-4); }
+
+/* Panel de dato protagonista */
+.tudi-panel {
+  background: var(--tudi-dark); color: var(--tudi-on-dark);
+  border-radius: var(--tudi-r-xl); padding: var(--tudi-s-6);
+}
+.tudi-panel-tile { background: var(--tudi-dark-2); border-radius: var(--tudi-r-md); padding: var(--tudi-s-3) var(--tudi-s-4); }
+
+/* ============================================================
+   Chips / etiquetas de macro
+   ============================================================ */
+
+.tudi-chip {
+  display: inline-flex; align-items: center;
+  font-family: var(--tudi-font-mono); font-size: 11px;
+  padding: 4px 9px; border-radius: var(--tudi-r-pill);
+  background: var(--tudi-surface); color: var(--tudi-ink-2);
+}
+.tudi-chip-solid { background: var(--tudi-ink); color: var(--tudi-on-dark); }
+.tudi-chip-lime  { background: var(--tudi-lime); color: var(--tudi-ink); }
+
+/* ============================================================
+   Anillo de progreso (déficit)  ·  --pct = 0..100
+   ============================================================ */
+
+.tudi-ring {
+  --pct: 0;
+  width: 214px; aspect-ratio: 1; border-radius: 50%;
+  background: conic-gradient(var(--tudi-lime) 0 calc(var(--pct) * 3.6deg),
+                             var(--tudi-dark-3) calc(var(--pct) * 3.6deg) 360deg);
+  display: grid; place-items: center;
+}
+.tudi-ring > * {
+  width: 84%; aspect-ratio: 1; border-radius: 50%; background: var(--tudi-dark);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+
+/* Barra de macro  ·  --pct = 0..100 */
+.tudi-bar { height: 6px; border-radius: var(--tudi-r-pill); background: var(--tudi-dark-4); overflow: hidden; }
+.tudi-bar > span { display: block; height: 100%; width: calc(var(--pct, 0) * 1%); background: var(--tudi-lime); }
+.tudi-bar.on-light { background: var(--tudi-surface); }
+
+/* ============================================================
+   Campos
+   ============================================================ */
+
+.tudi-input {
+  width: 100%; min-height: 48px; box-sizing: border-box;
+  padding: 12px var(--tudi-s-4);
+  background: var(--tudi-card-inset); border: 1px solid var(--tudi-surface);
+  border-radius: var(--tudi-r-sm);
+  font: inherit; color: var(--tudi-ink);
+}
+.tudi-input::placeholder { color: #8C8578; }
+.tudi-input:focus { border-color: var(--tudi-ink); outline: none; }
+
+/* Segmentado (sexo, tipo de déficit, nivel de actividad) */
+.tudi-seg { display: flex; gap: 6px; background: var(--tudi-surface); border-radius: var(--tudi-r-pill); padding: 5px; }
+.tudi-seg > * {
+  flex: 1; min-height: 40px; display: grid; place-items: center;
+  border-radius: var(--tudi-r-pill); font-size: 14px; cursor: pointer;
+}
+.tudi-seg > [aria-pressed="true"], .tudi-seg > .is-active { background: var(--tudi-ink); color: var(--tudi-on-dark); font-weight: 600; }
+
+/* Aviso / sugerencia de ajuste */
+.tudi-note {
+  display: flex; gap: var(--tudi-s-3);
+  background: var(--tudi-amber-bg); border-radius: var(--tudi-r-sm);
+  padding: var(--tudi-s-3); color: var(--tudi-amber-ink); font-size: 13px; line-height: 1.45;
+}
+.tudi-note::before { content: ""; flex: none; width: 4px; border-radius: 2px; background: var(--tudi-amber); }
+
+/* ============================================================
+   Navegación inferior (móvil) — objetivos táctiles ≥ 44px
+   ============================================================ */
+
+.tudi-tabbar {
+  display: flex; justify-content: space-between;
+  border-top: 1px solid var(--tudi-surface);
+  padding: var(--tudi-s-3) var(--tudi-s-8) var(--tudi-s-4);
+  background: var(--tudi-bg);
+}
+.tudi-tabbar a {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  min-width: 56px; min-height: 44px;
+  font-size: 11px; color: var(--tudi-muted); text-decoration: none;
+}
+.tudi-tabbar a[aria-current="page"] { color: var(--tudi-ink); font-weight: 600; }

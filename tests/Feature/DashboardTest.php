@@ -222,3 +222,75 @@ it('redirige "Mi progreso" al inicio para no romper enlaces guardados', function
 
     $this->actingAs($usuario)->get(route('progreso.index'))->assertRedirect(route('dashboard'));
 });
+
+/*
+|--------------------------------------------------------------------------
+| Racha y aviso de comidas sin reportar (CLAUDE.md secciones 5.23 y 5.24)
+|--------------------------------------------------------------------------
+*/
+
+it('muestra la racha de días seguidos cerrados', function () {
+    $usuario = usuarioParaDashboard();
+
+    foreach ([1, 2, 3] as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'cerrado' => true,
+            'cerrado_en' => now()->subDays($atras),
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertViewHas('racha', 3)
+        ->assertSee('días seguidos');
+});
+
+it('avisa de las comidas que quedaron sin reportar ayer, con enlace para completarlas', function () {
+    $usuario = usuarioParaDashboard();
+
+    $ayer = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDay()->toDateString(),
+    ]);
+
+    // Desayuno reportado; almuerzo y cena no.
+    $desayuno = PlanComida::factory()->for($ayer, 'registroDiario')->create(['tipo_comida' => 'desayuno']);
+    ComidaReal::factory()->for($desayuno, 'planComida')->create();
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Ayer te quedó sin reportar:')
+        ->assertSee('almuerzo, cena')
+        ->assertSee(route('planes.show', $ayer));
+});
+
+it('no avisa de un día de ayer que no se usó en absoluto', function () {
+    $usuario = usuarioParaDashboard();
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDay()->toDateString(),
+    ]);
+
+    // Ninguna comida reportada no es un descuido: es un día que no se usó.
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertViewHas('avisoAyer', null)
+        ->assertDontSee('Ayer te quedó sin reportar:');
+});
+
+it('no avisa cuando ayer quedó reportado entero', function () {
+    $usuario = usuarioParaDashboard();
+
+    $ayer = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDay()->toDateString(),
+    ]);
+
+    foreach (['desayuno', 'almuerzo', 'cena'] as $tipoComida) {
+        $plan = PlanComida::factory()->for($ayer, 'registroDiario')->create(['tipo_comida' => $tipoComida]);
+        ComidaReal::factory()->for($plan, 'planComida')->create();
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertViewHas('avisoAyer', null);
+});

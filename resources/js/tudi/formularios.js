@@ -15,8 +15,12 @@ import { conectarDictado } from './dictado';
 const SECCIONES_POR_DEFECTO = '#tudi-avisos,#panel-objetivo,#lista-comidas,#seccion-actividad,#seccion-cierre';
 
 /**
- * Acordeón: una sola comida abierta a la vez. El evento `toggle` no burbujea,
- * así que se escucha en fase de captura.
+ * Acordeón: una sola comida abierta a la vez. Cada tarjeta lleva dentro todo lo
+ * de esa comida —los ingredientes, lo planificado y su cierre (CLAUDE.md
+ * sección 5.5)—, así que abrir una y cerrar el resto es exactamente lo que hace
+ * falta para no tener media pantalla de formularios a la vez.
+ *
+ * El evento \`toggle\` no burbujea, así que se escucha en fase de captura.
  */
 function iniciarAcordeon() {
     document.addEventListener('toggle', (evento) => {
@@ -47,7 +51,6 @@ function restaurarComidaAbierta(tipo) {
         detalle.open = detalle.dataset.comida === tipo;
     });
 }
-
 function iniciarEnvioPorFetch() {
     document.addEventListener('submit', async (evento) => {
         const formulario = evento.target;

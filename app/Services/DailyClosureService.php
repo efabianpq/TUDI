@@ -42,7 +42,37 @@ class DailyClosureService
     }
 
     /**
-     * "Cerrar mi día": persist the closure and mark the day as closed.
+     * Las comidas del día que todavía no se han reportado, en el orden de
+     * DISTRIBUCION_COMIDAS (CLAUDE.md sección 5.5).
+     *
+     * Es el control de validación del cierre del día: cerrar sin haber
+     * reportado nada congela un día con 0 kcal consumidas, que no es un día sin
+     * comer sino un día sin contar, y ese cero entra luego en el promedio móvil
+     * de 7 días como si fuera un dato bueno.
+     *
+     * @return array<int, string>
+     */
+    public function comidasSinReportar(RegistroDiario $registroDiario): array
+    {
+        $reportadas = $registroDiario->planesComida()
+            ->has('comidaReal')
+            ->pluck('tipo_comida')
+            ->all();
+
+        return array_values(array_filter(
+            array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS),
+            fn (string $tipoComida): bool => ! in_array($tipoComida, $reportadas, true),
+        ));
+    }
+
+    /**
+     * "Cerrar mi día": consolida y congela las cifras del día.
+     *
+     * **No llama al proveedor de IA.** Desde el cierre por comida (sección 5.5)
+     * lo que se comió ya está reportado comida a comida, así que aquí solo se
+     * suma, se calcula el déficit con NutritionCalculatorService y se congela:
+     * cerrar el día no cuesta ninguna llamada ni puede fallar por un proveedor
+     * caído.
      *
      * @return array{calorias_objetivo: float, calorias_consumidas: float, calorias_actividad_ajustada: float, deficit_diario: float, proteina_objetivo_g: float, proteina_consumida_g: float, grasa_objetivo_g: ?float, grasa_consumida_g: ?float, carbohidratos_objetivo_g: ?float, carbohidratos_consumidos_g: ?float, cumplimiento_proteina_pct: float, recomendaciones: Collection<int, RecomendacionSistema>}
      *

@@ -12,6 +12,7 @@ use App\Http\Controllers\PlanComidaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProfileParametersController;
 use App\Http\Controllers\RecomendacionSistemaController;
+use App\Http\Controllers\ReporteComidaController;
 use App\Http\Controllers\TranscripcionController;
 use Illuminate\Support\Facades\Route;
 
@@ -45,7 +46,7 @@ Route::middleware(['auth', 'cuenta.activa', 'admin'])->prefix('admin')->name('ad
 
     Route::get('/usuarios', [Admin\UsuarioController::class, 'index'])->name('usuarios.index');
     Route::patch('/usuarios/{usuario}', [Admin\UsuarioController::class, 'update'])->name('usuarios.update');
-    Route::post('/usuarios/{usuario}/codigo', [Admin\UsuarioController::class, 'regenerarCodigo'])->name('usuarios.codigo');
+    Route::post('/usuarios/{usuario}/plan', [Admin\UsuarioController::class, 'plan'])->name('usuarios.plan');
     Route::delete('/usuarios/{usuario}', [Admin\UsuarioController::class, 'destroy'])->name('usuarios.destroy');
 
     Route::get('/parametros', [Admin\ParametroMaestroController::class, 'edit'])->name('parametros.edit');
@@ -76,9 +77,14 @@ Route::middleware(['auth', 'cuenta.activa'])->group(function () {
     Route::get('/planes/{registroDiario}', [PlanComidaController::class, 'show'])->name('planes.show');
     Route::post('/planes/{registroDiario}/distribucion', [PlanComidaController::class, 'distribuir'])->name('planes.distribucion');
     Route::post('/planes/{registroDiario}/peso', [PlanComidaController::class, 'peso'])->name('planes.peso');
-    // Reparto de calorías entre comidas de ese día (sección 5.14) y las dos
-    // acciones destructivas del plan diario (sección 5.16).
-    Route::post('/planes/{registroDiario}/reparto', [PlanComidaController::class, 'reparto'])->name('planes.reparto');
+
+    // Reporte de comidas (sección 5.5): cada comida se cierra y se reabre por
+    // separado, y desde ese momento entra en el saldo del día. El tipo de
+    // comida va en la URL y lo valida el controlador contra DISTRIBUCION_COMIDAS.
+    Route::post('/planes/{registroDiario}/comidas/{tipoComida}/cerrar', [ReporteComidaController::class, 'cerrar'])->name('comidas.cerrar');
+    Route::post('/planes/{registroDiario}/comidas/{tipoComida}/reabrir', [ReporteComidaController::class, 'reabrir'])->name('comidas.reabrir');
+
+    // Las dos acciones destructivas del plan diario (sección 5.16).
     Route::post('/planes/{registroDiario}/resetear', [PlanComidaController::class, 'resetear'])->name('planes.resetear');
     Route::delete('/planes/{registroDiario}', [PlanComidaController::class, 'destroy'])->name('planes.destroy');
     Route::post('/planes/{registroDiario}/generar', [PlanComidaController::class, 'generar'])->name('planes.generar');

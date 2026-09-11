@@ -38,6 +38,24 @@
         {{-- Estado del plan: una línea, sin bloquear nada (sección 5.18). --}}
         <x-tudi.plan />
 
+        {{--
+            "Ayer no reportaste la cena" (CLAUDE.md sección 5.24). Una línea con
+            el enlace al día, para que se pueda arreglar: un hueco sin reportar
+            entra luego en el promedio móvil como calorías que nunca se comieron.
+        --}}
+        @if ($avisoAyer)
+            <div class="tudi-card flex flex-wrap items-center justify-between gap-3 border-tudi-amber bg-tudi-amber-bg p-4">
+                <p class="text-sm text-tudi-amber-ink">
+                    {{ __('Ayer te quedó sin reportar:') }}
+                    <span class="font-semibold">{{ implode(', ', $avisoAyer['comidas']) }}</span>.
+                </p>
+                <a href="{{ route('planes.show', $avisoAyer['registro']) }}"
+                   class="tudi-btn tudi-btn-secondary text-[13px] no-underline">
+                    {{ __('Completar ayer') }}
+                </a>
+            </div>
+        @endif
+
         {{-- ══ Hoy: el déficit es el único dato protagonista ══ --}}
         @if ($errorResumen)
             <div class="tudi-panel">
@@ -181,6 +199,15 @@
 
                 <div class="rounded-tudi-xl bg-tudi-surface p-5">
                     <p class="tudi-label">{{ __('Racha') }}</p>
+                    {{--
+                        Días SEGUIDOS cerrados (sección 5.23), no los de la
+                        ventana: es la lectura que engancha, y hoy sin cerrar
+                        todavía no la rompe porque el día sigue en curso. Los
+                        siete puntos de abajo siguen contando la semana.
+                    --}}
+                    <p class="tudi-num mt-1.5 text-[28px]">
+                        {{ $racha }} <span class="text-base font-normal text-tudi-ink-3">{{ trans_choice('día seguido|días seguidos', $racha) }}</span>
+                    </p>
                     <div class="mt-2.5 flex gap-1.5" role="img"
                          aria-label="{{ $metricas['dias_cerrados'] }} {{ __('de 7 días cerrados') }}">
                         @for ($dia = 1; $dia <= 7; $dia++)

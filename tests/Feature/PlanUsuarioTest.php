@@ -202,38 +202,43 @@ it('distribuye con normalidad durante la prueba', function () {
 
     $this->actingAs($usuario)->post(route('planes.distribucion', $registroDiario), [
         'ingredientes' => ['desayuno' => 'dos huevos y media palta'],
-    ])->assertSessionHas('status', 'distribucion-generada');
+    ])->assertSessionHas('status', 'plan-ajustado');
 
     expect($registroDiario->planesComida()->count())->toBe(1);
 });
 
-// ── Control de acceso: estimación de consumo real en el cierre ───────────────
+// ── Control de acceso: estimación de consumo real al cerrar una comida ──────
 
-it('no estima con IA lo que se comió en el plan Gratis, y deja el día sin cerrar', function () {
+it('no estima con IA lo que se comió en el plan Gratis, y deja la comida sin cerrar', function () {
     Http::fake();
 
     $usuario = usuarioConPerfil(['plan' => User::PLAN_GRATIS]);
     $registroDiario = diaConAlmuerzoPlanificado($usuario);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
-        'feedback' => ['almuerzo' => ['texto' => 'al final me comí un sándwich']],
+    $this->actingAs($usuario)->post(route('comidas.cerrar', [$registroDiario, 'almuerzo']), [
+        'texto' => 'al final me comí un sándwich',
     ])->assertSessionHas('error');
 
     expect(session('error'))->toContain('Premium')
-        ->and($registroDiario->fresh()->cerrado)->toBeFalse();
+        ->and($registroDiario->planesComida()->first()->comidaReal)->toBeNull();
 
     Http::assertNothingSent();
 });
 
-it('cierra el día en el plan Gratis por el camino que no cuesta una llamada', function () {
+it('cierra comida y día en el plan Gratis por el camino que no cuesta una llamada', function () {
     Http::fake();
 
     $usuario = usuarioConPerfil(['plan' => User::PLAN_GRATIS]);
     $registroDiario = diaConAlmuerzoPlanificado($usuario);
 
-    // "Sí, lo cumplí" no pasa por el proveedor: el cierre diario es gratis.
+    // "Cumplí lo sugerido" no pasa por el proveedor, y cerrar el día tampoco
+    // llama nunca a la IA (sección 5.5): el día entero es gratis.
+    $this->actingAs($usuario)->post(route('comidas.cerrar', [$registroDiario, 'almuerzo']), [
+        'cumplio' => '1',
+    ])->assertSessionHas('status', 'comida-cerrada');
+
     $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
-        'feedback' => ['almuerzo' => ['cumplio' => '1']],
+        'confirmar_sin_reportar' => '1',
     ])->assertSessionHas('status', 'dia-cerrado');
 
     expect($registroDiario->fresh()->cerrado)->toBeTrue()
@@ -295,8 +300,10 @@ it('el motor de recomendaciones solo corre con Premium', function (string $plan,
 
     $registroDiario = diaConAlmuerzoPlanificado($usuario);
 
+    $this->actingAs($usuario)->post(route('comidas.cerrar', [$registroDiario, 'almuerzo']), ['cumplio' => '1']);
+
     $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
-        'feedback' => ['almuerzo' => ['cumplio' => '1']],
+        'confirmar_sin_reportar' => '1',
     ])->assertSessionHas('status', 'dia-cerrado');
 
     expect($registroDiario->fresh()->recomendacionesSistema()->count())->toBe($esperadas);

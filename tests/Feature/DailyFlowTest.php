@@ -7,6 +7,7 @@ use App\Models\PlanComida;
 use App\Models\RecomendacionSistema;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use App\Services\MealDistributionService;
 use App\Services\MealPlanGeneratorService;
 use Illuminate\Support\Carbon;
 
@@ -189,22 +190,22 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     expect(ComidaReal::where('plan_comida_id', $desayuno->id)->count())->toBe(1);
 
-    // El exceso se reparte, con signo, entre las comidas todavía sin registrar,
-    // proporcionalmente a su participación en el total pendiente (sección 4.3).
-    $pendientePlanificado = $estimadasAlmuerzo + $estimadasCena;
-    $esperadoAlmuerzo = round($estimadasAlmuerzo - $desviacion * ($estimadasAlmuerzo / $pendientePlanificado), 2);
-    $esperadoCena = round($estimadasCena - $desviacion * ($estimadasCena / $pendientePlanificado), 2);
-
-    expect((float) $almuerzo->fresh()->calorias_estimadas)->toEqualWithDelta($esperadoAlmuerzo, 0.01)
-        ->and((float) $cena->fresh()->calorias_estimadas)->toEqualWithDelta($esperadoCena, 0.01)
-        // Lo recortado a almuerzo + cena es exactamente el exceso del desayuno.
-        ->and(($estimadasAlmuerzo - $esperadoAlmuerzo) + ($estimadasCena - $esperadoCena))
-        ->toEqualWithDelta($desviacion, 0.02)
+    // Los planes persistidos NO se reescriben: sus calorías siguen siendo las de
+    // sus ingredientes (sección 5.3). El exceso se ve en el saldo del día, que
+    // es lo que guía a "Calcular mi plan" y lo que la pantalla enseña.
+    expect((float) $almuerzo->fresh()->calorias_estimadas)->toBe($estimadasAlmuerzo)
+        ->and((float) $cena->fresh()->calorias_estimadas)->toBe($estimadasCena)
         // La comida ya registrada no se toca nunca.
         ->and((float) $desayuno->fresh()->calorias_estimadas)->toBe($estimadasDesayuno)
         // Y el acumulado del día refleja lo realmente comido.
         ->and((float) $registroDiario->fresh()->calorias_consumidas)
         ->toBe($comidaRealDesayuno['calorias_reales']);
+
+    $saldo = app(MealDistributionService::class)->saldoDelDia($registroDiario->fresh());
+
+    expect($saldo['saldo']['calorias'])
+        ->toEqualWithDelta(OBJETIVO_KCAL_FLUJO_DIARIO - $comidaRealDesayuno['calorias_reales'], 0.01)
+        ->and($saldo['comidas_pendientes'])->toBe(['almuerzo', 'cena']);
 
     // ── Paso 5: actividad física ────────────────────────────────────────────
     // caminata → factor 0.85 · 400 = 340 kcal; pesas → factor 0.80 · 200 = 160 kcal.
@@ -238,7 +239,7 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
 
     // ── Paso 6: cierre del día ──────────────────────────────────────────────
     $this->actingAs($usuario)
-        ->post(route('cierre.cerrar', $registroDiario))
+        ->post(route('cierre.cerrar', $registroDiario), ['confirmar_sin_reportar' => '1'])
         ->assertRedirect(route('planes.show', $registroDiario))
         ->assertSessionHas('status', 'dia-cerrado');
 
@@ -262,8 +263,6 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         ->and((float) $registroDiario->proteina_objetivo_g)->toBe(PROTEINA_OBJETIVO_FLUJO_DIARIO)
         ->and((float) $registroDiario->proteina_consumida_g)->toBe($comidaRealDesayuno['proteina_g']);
 
-    $cumplimientoProteina = $comidaRealDesayuno['proteina_g'] / PROTEINA_OBJETIVO_FLUJO_DIARIO * 100;
-
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
         ->assertSee('Resumen del cierre')
@@ -271,7 +270,10 @@ test('el día completo de un usuario, paso a paso y cuadrando con la sección 5'
         ->assertSee(kcalDelFlujoDiario($caloriasConsumidas))
         ->assertSee(kcalDelFlujoDiario($caloriasActividad))
         ->assertSee(kcalDelFlujoDiario($deficitEsperado))
-        ->assertSee(number_format($cumplimientoProteina, 1, ',', '.').'%');
+        // La proteína se lee en su barra (real / objetivo), no como un
+        // porcentaje repetido: el cierre dejó de duplicar la misma tarjeta.
+        ->assertSee(number_format($comidaRealDesayuno['proteina_g'], 1, ',', '.').' / '
+            .number_format(PROTEINA_OBJETIVO_FLUJO_DIARIO, 1, ',', '.').' g');
 
     // ── Paso 7: recomendaciones del sistema ─────────────────────────────────
     // Con un solo día de historial no corresponde ninguna: la sección 6 prohíbe
@@ -332,8 +334,14 @@ test('un ajuste calórico confirmado pasa a dimensionar el plan y el cierre', fu
     expect($totalPlanificado)->toEqualWithDelta(1962.0, 1962.0 * 0.05)
         ->and($totalPlanificado)->toBeLessThan(OBJETIVO_KCAL_FLUJO_DIARIO);
 
+    // Cerrar el día exige haber reportado al menos una comida (sección 5.5).
+    $desayunoVigente = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->firstOrFail();
+
+    $this->actingAs($usuario)->post(route('comidas.cerrar', [$registroDiario, 'desayuno']), ['cumplio' => '1']);
+
     // Y el cierre congela ese mismo objetivo vigente.
-    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), ['confirmar_sin_reportar' => '1'])
+        ->assertSessionHas('status', 'dia-cerrado');
 
     expect((float) $registroDiario->fresh()->calorias_objetivo_dia)->toBe(1962.0);
 });
@@ -363,7 +371,8 @@ test('el día cerrado queda congelado y su resumen ya no depende del perfil', fu
         'fuente' => 'dispositivo',
     ]);
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), ['confirmar_sin_reportar' => '1'])
+        ->assertSessionHas('status', 'dia-cerrado');
 
     // deficit = 2112 - 600 + 340 = 1852
     expect((float) $registroDiario->fresh()->deficit_diario)->toBe(1852.0);

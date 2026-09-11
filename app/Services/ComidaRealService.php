@@ -11,10 +11,22 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Registers what the user actually ate against an existing PlanComida, and
- * propagates the effect of that record on the rest of the day: the
- * RegistroDiario's calorias_consumidas total, and the calorie budget left
- * for the meals of that same day that have not been logged yet.
+ * Persiste lo que el usuario comió de verdad contra un PlanComida y mantiene al
+ * día el total `calorias_consumidas` del RegistroDiario.
+ *
+ * ── Por qué ya no redistribuye el presupuesto pendiente ────────────────────
+ *
+ * Antes, al registrar una comida, este servicio repartía la desviación entre
+ * las comidas del día todavía sin registrar, tocándoles `calorias_estimadas`.
+ * Eso dejaba planes incoherentes consigo mismos —la suma de sus ingredientes ya
+ * no daba sus calorías— y lo hacía en silencio, sin que el usuario pudiera
+ * verlo ni deshacerlo.
+ *
+ * Con el cierre por comida (CLAUDE.md sección 5.5) el saldo del día se calcula
+ * en vivo desde las ComidaReal (MealDistributionService::saldoDelDia) y se
+ * enseña en pantalla, y quien lo reparte de verdad es "Ajustar mi plan", que
+ * regenera las comidas pendientes contra ese saldo. Un plan persistido vuelve a
+ * significar exactamente lo que dice.
  */
 class ComidaRealService
 {
@@ -59,12 +71,7 @@ class ComidaRealService
                 'imagen_evidencia' => $rutaImagen,
             ]);
 
-            $desviacion = (float) $datos['calorias_reales'] - (float) $planComida->calorias_estimadas;
-
-            $registroDiario = $planComida->registroDiario;
-
-            $this->redistribuirCaloriasPendientes($registroDiario, $desviacion);
-            $this->actualizarCaloriasConsumidas($registroDiario);
+            $this->actualizarCaloriasConsumidas($planComida->registroDiario);
 
             return $comidaReal;
         });
@@ -79,10 +86,13 @@ class ComidaRealService
      * una respuesta dada por error quedaba congelada hasta borrar el día
      * entero, y al reabrir un día ya no volvía a preguntarse nada.
      *
-     * No revierte la redistribución de calorías que hizo `registrar()` sobre
-     * las comidas pendientes: esos presupuestos ya se movieron y volver a
-     * generar la comida los recalcula. Sí recalcula `calorias_consumidas`, que
-     * es la cifra que entra al cierre.
+     * Si el PlanComida no era un plan sino el recipiente de un reporte sin plan
+     * previo (`origen = reporte`, sección 5.5), se borra también: sin su
+     * ComidaReal no queda nada dentro, y dejarlo convertiría la comida en un
+     * plan fantasma de 0 kcal. Un plan de verdad sobrevive y vuelve al estado
+     * "planificada", que es lo que permite volver a reportarlo.
+     *
+     * Recalcula `calorias_consumidas`, que es la cifra que entra al cierre.
      *
      * @return bool si había algo que borrar
      *
@@ -108,7 +118,13 @@ class ComidaRealService
             $comidaReal->delete();
             $planComida->unsetRelation('comidaReal');
 
-            $this->actualizarCaloriasConsumidas($planComida->registroDiario);
+            $registroDiario = $planComida->registroDiario;
+
+            if ($planComida->esReporteSinPlan()) {
+                $planComida->delete();
+            }
+
+            $this->actualizarCaloriasConsumidas($registroDiario);
 
             return true;
         });
@@ -128,36 +144,6 @@ class ComidaRealService
 
         if ($rutas !== []) {
             Storage::disk(self::DISCO_IMAGENES)->delete($rutas);
-        }
-    }
-
-    /**
-     * Spread the deviation between real and planned calories of the meal
-     * just logged across the meals of the same day that don't have a
-     * ComidaReal yet, proportionally to each one's current planned share.
-     * An excess at breakfast (positive deviation) shrinks what's left for
-     * lunch/dinner; eating less than planned (negative deviation) grows it.
-     * Never lets a meal's budget go below zero.
-     */
-    private function redistribuirCaloriasPendientes(RegistroDiario $registroDiario, float $desviacion): void
-    {
-        if ($desviacion === 0.0) {
-            return;
-        }
-
-        $pendientes = $registroDiario->planesComida()->doesntHave('comidaReal')->get();
-
-        $totalPlanificadoPendiente = (float) $pendientes->sum(fn (PlanComida $plan) => (float) $plan->calorias_estimadas);
-
-        if ($totalPlanificadoPendiente <= 0) {
-            return;
-        }
-
-        foreach ($pendientes as $pendiente) {
-            $participacion = (float) $pendiente->calorias_estimadas / $totalPlanificadoPendiente;
-            $nuevasCalorias = max(0, (float) $pendiente->calorias_estimadas - $desviacion * $participacion);
-
-            $pendiente->update(['calorias_estimadas' => round($nuevasCalorias, 2)]);
         }
     }
 

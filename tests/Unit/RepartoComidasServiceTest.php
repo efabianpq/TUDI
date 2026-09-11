@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\ActividadFisica;
+use App\Models\ComidaReal;
+use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Models\User;
 use App\Services\MealPlanGeneratorService;
@@ -7,93 +10,180 @@ use App\Services\RepartoComidasService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-// El servicio persiste sobre Eloquent, así que este archivo activa TestCase +
-// RefreshDatabase explícitamente (tests/Pest.php solo los aplica a Feature).
+/**
+ * El reparto entre comidas ya no lo teclea nadie (CLAUDE.md sección 5.14): se
+ * deriva de un reparto balanceado y de la actividad física del día. Estos tests
+ * fijan las dos cosas que eso tiene que cumplir siempre — que el día siga
+ * sumando 1.0, y que el desplazamiento vaya a la comida correcta.
+ */
 uses(TestCase::class, RefreshDatabase::class);
 
+function usuarioConObjetivo(int $objetivo = 2000): User
+{
+    return User::factory()->create([
+        'peso_kg' => 80,
+        'nivel_actividad' => 1.2,
+        'tipo_deficit' => 'porcentaje',
+        'valor_deficit' => 0.20,
+        'proteina_factor' => 1.8,
+        'grasa_factor' => 0.8,
+        'calorias_objetivo' => $objetivo,
+    ]);
+}
+
+function diaDe(User $usuario): RegistroDiario
+{
+    return RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+}
+
 /**
- * Reparto de calorías entre comidas (CLAUDE.md sección 5.14): el día manda
- * sobre el habitual del usuario, y el habitual sobre el 25/40/35 de fábrica.
+ * `created_at` no es asignable en masa, y es lo que dice a qué hora se entrenó.
  */
-function servicioDeReparto(): RepartoComidasService
+function registrarActividad(RegistroDiario $dia, int $hora, float $caloriasAjustadas = 300): ActividadFisica
 {
-    return app(RepartoComidasService::class);
+    $actividad = $dia->actividadesFisicas()->create([
+        'tipo' => 'trote',
+        'duracion_min' => 40,
+        'calorias_dispositivo' => $caloriasAjustadas / 0.85,
+        'factor_correccion' => 0.85,
+        'calorias_ajustadas' => $caloriasAjustadas,
+    ]);
+
+    $actividad->forceFill(['created_at' => $dia->fecha->copy()->setTime($hora, 0)])->save();
+
+    return $actividad;
 }
 
-function diaDeReparto(array $atributosDelDia = [], array $atributosDelUsuario = []): RegistroDiario
+function cerrarComida(RegistroDiario $dia, string $tipoComida): void
 {
-    $usuario = User::factory()->create($atributosDelUsuario);
+    $plan = $dia->planesComida()->create([
+        'tipo_comida' => $tipoComida,
+        'descripcion' => ucfirst($tipoComida),
+        'calorias_estimadas' => 500,
+        'proteina_g' => 30,
+        'grasa_g' => 15,
+        'carbohidratos_g' => 50,
+    ]);
 
-    return RegistroDiario::factory()->for($usuario, 'usuario')->create($atributosDelDia);
+    ComidaReal::factory()->for($plan, 'planComida')->create(['calorias_reales' => 500]);
 }
 
-it('cae al reparto de fábrica cuando ni el día ni el usuario tienen uno propio', function () {
-    $dia = diaDeReparto();
+it('parte del reparto balanceado declarado en DISTRIBUCION_COMIDAS', function () {
+    expect(app(RepartoComidasService::class)->balanceado())
+        ->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS)
+        ->and(array_sum(MealPlanGeneratorService::DISTRIBUCION_COMIDAS))
+        ->toEqualWithDelta(1.0, 0.0001);
+});
 
-    expect(servicioDeReparto()->paraElDia($dia))
+it('usa el reparto balanceado en un día sin actividad', function () {
+    $dia = diaDe(usuarioConObjetivo());
+
+    expect(app(RepartoComidasService::class)->paraElDia($dia))
         ->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
 });
 
-it('usa el reparto habitual del usuario cuando el día no tiene uno propio', function () {
-    $habitual = ['desayuno' => 0.30, 'almuerzo' => 0.30, 'cena' => 0.40];
+it('desplaza calorías hacia la comida que viene después del entrenamiento', function () {
+    $dia = diaDe(usuarioConObjetivo());
+    registrarActividad($dia, 10);
 
-    $dia = diaDeReparto([], ['reparto_comidas' => $habitual]);
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->refresh());
 
-    expect(servicioDeReparto()->paraElDia($dia))->toBe($habitual);
+    expect($reparto['almuerzo'])->toBeGreaterThan(0.40)
+        ->and($reparto['desayuno'])->toBeLessThan(0.30)
+        ->and($reparto['cena'])->toBeLessThan(0.30)
+        ->and(array_sum($reparto))->toEqualWithDelta(1.0, 0.0001);
 });
 
-it('el reparto del día manda sobre el habitual del usuario', function () {
-    $dia = diaDeReparto(
-        ['reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40]],
-        ['reparto_comidas' => ['desayuno' => 0.30, 'almuerzo' => 0.30, 'cena' => 0.40]],
-    );
+it('entrenar de noche desplaza hacia la cena', function () {
+    $dia = diaDe(usuarioConObjetivo());
+    registrarActividad($dia, 21);
 
-    expect(servicioDeReparto()->paraElDia($dia)['desayuno'])->toBe(0.10);
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->refresh());
+
+    expect($reparto['cena'])->toBeGreaterThan(0.30)
+        ->and(array_sum($reparto))->toEqualWithDelta(1.0, 0.0001);
 });
 
-it('guardar el reparto de fábrica limpia la columna en vez de persistirlo', function () {
-    $dia = diaDeReparto(['reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40]]);
+it('no desplaza hacia una comida ya cerrada, sino hacia la siguiente abierta', function () {
+    $dia = diaDe(usuarioConObjetivo());
+    cerrarComida($dia, 'almuerzo');
+    registrarActividad($dia, 10);
 
-    servicioDeReparto()->guardar($dia, ['desayuno' => 25, 'almuerzo' => 40, 'cena' => 35]);
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->refresh());
 
-    // Así un cambio futuro del valor de fábrica alcanza a quien nunca lo tocó.
-    expect($dia->fresh()->reparto_comidas)->toBeNull();
+    // El almuerzo ya está cerrado y sus macros no se tocan (sección 5.5), así
+    // que lo que queda por comer es lo que absorbe el desplazamiento.
+    expect($reparto['cena'])->toBeGreaterThan(0.30)
+        ->and($reparto['almuerzo'])->toBeLessThan(0.40);
 });
 
-it('guarda el reparto solo en el día si no se pide adoptarlo como habitual', function () {
-    $dia = diaDeReparto();
+it('vuelve al reparto balanceado cuando ya están todas las comidas cerradas', function () {
+    $dia = diaDe(usuarioConObjetivo());
 
-    servicioDeReparto()->guardar($dia, ['desayuno' => 20, 'almuerzo' => 45, 'cena' => 35]);
+    foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
+        cerrarComida($dia, $tipoComida);
+    }
 
-    expect($dia->fresh()->reparto_comidas['desayuno'])->toBe(0.2)
-        ->and($dia->usuario->fresh()->reparto_comidas)->toBeNull();
-});
+    registrarActividad($dia, 10);
 
-it('adopta el reparto como habitual del usuario cuando se pide', function () {
-    $dia = diaDeReparto();
-
-    servicioDeReparto()->guardar($dia, ['desayuno' => 20, 'almuerzo' => 45, 'cena' => 35], comoHabitual: true);
-
-    expect($dia->usuario->fresh()->reparto_comidas)
-        ->toBe(['desayuno' => 0.2, 'almuerzo' => 0.45, 'cena' => 0.35]);
-});
-
-it('rechaza un reparto que no suma 100', function () {
-    servicioDeReparto()->desdePorcentajes(['desayuno' => 25, 'almuerzo' => 40, 'cena' => 40]);
-})->throws(InvalidArgumentException::class, 'sumar 100%');
-
-it('rechaza una comida por debajo del mínimo', function () {
-    servicioDeReparto()->desdePorcentajes(['desayuno' => 2, 'almuerzo' => 58, 'cena' => 40]);
-})->throws(InvalidArgumentException::class, 'al menos el 5%');
-
-it('rechaza un reparto al que le falta una comida', function () {
-    servicioDeReparto()->desdePorcentajes(['desayuno' => 30, 'almuerzo' => 70]);
-})->throws(InvalidArgumentException::class, 'Falta el porcentaje del cena');
-
-it('ignora un reparto persistido que no suma 1.0 y cae al siguiente escalón', function () {
-    // Una fila manipulada a mano no puede desdibujar el objetivo del día.
-    $dia = diaDeReparto(['reparto_comidas' => ['desayuno' => 0.5, 'almuerzo' => 0.5, 'cena' => 0.5]]);
-
-    expect(servicioDeReparto()->paraElDia($dia))
+    expect(app(RepartoComidasService::class)->paraElDia($dia->refresh()))
         ->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
+});
+
+it('acota el desplazamiento por muchas calorías que se quemen', function () {
+    $dia = diaDe(usuarioConObjetivo(2000));
+    // 1500 kcal de actividad sobre un objetivo de 2000 serían 75 puntos.
+    registrarActividad($dia, 10, 1500);
+
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->refresh());
+
+    expect($reparto['almuerzo'])
+        ->toEqualWithDelta(0.40 + RepartoComidasService::PUNTOS_MAXIMOS_ACTIVIDAD, 0.0001)
+        ->and(array_sum($reparto))->toEqualWithDelta(1.0, 0.0001);
+});
+
+it('ignora la actividad si el usuario todavía no tiene objetivo calórico', function () {
+    $usuario = usuarioConObjetivo();
+    $usuario->update(['calorias_objetivo' => null]);
+
+    $dia = diaDe($usuario);
+    registrarActividad($dia, 10);
+
+    expect(app(RepartoComidasService::class)->paraElDia($dia->refresh()))
+        ->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
+});
+
+it('explica qué comida recibió el desplazamiento y de cuánto fue', function () {
+    $dia = diaDe(usuarioConObjetivo(2000));
+    registrarActividad($dia, 10, 200);
+
+    $explicacion = app(RepartoComidasService::class)->explicacion($dia->refresh());
+
+    expect($explicacion['comida'])->toBe('almuerzo')
+        ->and($explicacion['calorias_actividad'])->toEqualWithDelta(200.0, 0.01)
+        ->and($explicacion['puntos'])->toEqualWithDelta(0.10, 0.0001)
+        ->and($explicacion['reparto'])->toBe(app(RepartoComidasService::class)->paraElDia($dia));
+});
+
+it('un día sin actividad no tiene nada que explicar', function () {
+    $explicacion = app(RepartoComidasService::class)->explicacion(diaDe(usuarioConObjetivo()));
+
+    expect($explicacion['comida'])->toBeNull()
+        ->and($explicacion['puntos'])->toBe(0.0)
+        ->and($explicacion['reparto'])->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
+});
+
+it('ninguna comida baja del mínimo por el desplazamiento', function () {
+    $dia = diaDe(usuarioConObjetivo(2000));
+    registrarActividad($dia, 21, 5000);
+
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->refresh());
+
+    foreach ($reparto as $proporcion) {
+        expect($proporcion)->toBeGreaterThanOrEqual(RepartoComidasService::PROPORCION_MINIMA);
+    }
+
+    expect(PlanComida::count())->toBe(0);
 });

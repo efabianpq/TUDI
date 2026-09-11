@@ -50,6 +50,24 @@ class MealDistributionUnavailableException extends RuntimeException
         );
     }
 
+    /**
+     * El usuario gastó su cuota diaria de llamadas a la IA (CLAUDE.md sección
+     * 5.20). Tampoco es un fallo: el mensaje dice cuántas eran y, sobre todo,
+     * qué SÍ se puede seguir haciendo hoy sin IA, que es lo que necesita leer
+     * quien se queda a media tarde sin distribuciones.
+     */
+    public static function cuotaDiariaAgotada(string $concepto, int $limite): self
+    {
+        return new self(
+            $concepto === 'reporte'
+                ? "Llegaste a tus {$limite} reportes con IA de hoy. Puedes seguir cerrando tus comidas ".
+                  'con "cumplí lo sugerido" o repitiendo una comida frecuente, que no gastan cuota. '.
+                  'Mañana vuelves a tener todas.'
+                : "Llegaste a tus {$limite} ajustes de plan de hoy. Tu plan y tus reportes siguen ".
+                  'igual, y mañana vuelves a tener todos.'
+        );
+    }
+
     public static function porRespuestaInvalida(string $detalle): self
     {
         return new self(

@@ -85,11 +85,12 @@ it('abre una sola comida a la vez en el plan diario', function () {
         ->assertOk()
         ->getContent();
 
-    // Solo los acordeones de comida llevan data-comida; la sección de actividad
-    // física es otro <details> (sección 4.23) y no entra en la cuenta.
+    // Una sola lista: cada tarjeta lleva dentro todo lo de esa comida —los
+    // ingredientes, lo planificado y su cierre (sección 5.5)—, así que tres
+    // acordeones y uno solo abierto. La sección de actividad física es otro
+    // <details> y no entra en la cuenta.
     expect(substr_count($contenido, 'data-comida="'))->toBe(3)
         ->and(substr_count($contenido, 'data-comida="desayuno" open>'))->toBe(1)
-        // Ninguna otra abierta: el acordeón deja ver una comida a la vez.
         ->and(substr_count($contenido, ' open>'))->toBe(1);
 });
 
@@ -126,7 +127,7 @@ it('el campo de ingredientes lleva la ayuda dentro, como placeholder', function 
         ->assertDontSee('Cuéntanos en un párrafo qué tienes disponible');
 });
 
-it('pregunta el cumplimiento de cada comida con un interruptor', function () {
+it('pregunta el cumplimiento de cada comida con un interruptor, en su propio cierre', function () {
     $usuario = usuarioDelRediseno();
     $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
         'fecha' => now()->toDateString(),
@@ -139,10 +140,15 @@ it('pregunta el cumplimiento de cada comida con un interruptor', function () {
 
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('feedback[cena][cumplio]', escape: false)
+        // Cada comida se cierra por separado (sección 5.5): la pregunta vive
+        // en su propia tarjeta, no en una batería al final del día.
+        ->assertSee(route('comidas.cerrar', [$registroDiario, 'cena']))
+        ->assertSee('Cumplí lo sugerido')
         ->assertSee('tudi-switch', escape: false)
-        ->assertSee('Cerrar mi día')
-        ->assertSee('Al cerrar se congelan tus cifras del día.');
+        ->assertSee('Cerrar cena')
+        // Y cerrar el día ya no pregunta nada: solo valida que haya algo que
+        // consolidar (sección 5.5).
+        ->assertSee('Cierra al menos una comida antes de cerrar el día.');
 });
 
 it('la calculadora manda los valores de sus controles táctiles', function () {
@@ -178,7 +184,7 @@ it('la calculadora enseña el objetivo vigente arriba, antes que los controles',
 |--------------------------------------------------------------------------
 */
 
-it('ofrece un solo "Generar distribución" para las tres comidas, no uno por comida', function () {
+it('ofrece un solo "Calcular mi plan" para las tres comidas, no uno por comida', function () {
     $usuario = usuarioDelRediseno();
     $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
         'fecha' => now()->toDateString(),
@@ -186,12 +192,12 @@ it('ofrece un solo "Generar distribución" para las tres comidas, no uno por com
 
     $contenido = $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('Una sola consulta para desayuno, almuerzo y cena.')
+        ->assertSee('Reparte lo que te queda del día entre las comidas que faltan.')
         ->getContent();
 
     // Un único botón, y los tres textareas dentro del mismo formulario para que
     // viajen juntos en una sola petición al proveedor.
-    expect(substr_count($contenido, 'Generar distribución'))->toBe(1)
+    expect(substr_count($contenido, 'Calcular mi plan'))->toBe(1)
         ->and(substr_count($contenido, 'name="ingredientes['))->toBe(3);
 });
 
@@ -230,8 +236,9 @@ it('ya no ofrece "Registrar" por comida: lo que se comió se cuenta al cerrar el
         ->assertDontSee(route('comida-real.create', $plan))
         // ...y "Rehacer" sigue estando, que es lo que sí pertenece a esta sección.
         ->assertSee('Rehacer solo el almuerzo')
-        // La foto de evidencia se adjunta ahora en el cierre.
-        ->assertSee('feedback[almuerzo][imagen]', escape: false)
+        // La foto de evidencia se adjunta ahora al cerrar esa comida.
+        ->assertSee(route('comidas.cerrar', [$registroDiario, 'almuerzo']))
+        ->assertSee('name="imagen"', escape: false)
         ->assertSee('Adjuntar foto (opcional)');
 });
 
@@ -270,8 +277,10 @@ it('avisa al usuario mientras la IA responde', function () {
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
         ->assertSee('id="tudi-cargando"', escape: false)
-        ->assertSee('data-cargando="Generando tu distribución…"', escape: false)
-        ->assertSee('data-cargando="Cerrando tu día…"', escape: false);
+        ->assertSee('data-cargando="Ajustando tu plan…"', escape: false)
+        ->assertSee('data-cargando="Cerrando tu día…"', escape: false)
+        // Cerrar una comida puede pasar por la IA: también avisa (regla 11).
+        ->assertSee('data-cargando="Cerrando tu desayuno…"', escape: false);
 });
 
 it('acepta decimales tecleados con coma en el peso del día', function () {
@@ -403,7 +412,9 @@ it('muestra en el cierre el resultado real frente al objetivo, macro a macro', f
         ->assertSee('Lo que llevas comido')
         ->assertSee('25,0');
 
-    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario));
+    $this->actingAs($usuario)->post(route('cierre.cerrar', $registroDiario), [
+        'confirmar_sin_reportar' => '1',
+    ]);
 
     // …y una vez cerrado, el resultado congelado del día.
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))

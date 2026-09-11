@@ -421,3 +421,78 @@ it('omite una variación semanal cuando falta el promedio de una de las dos sema
     expect($variaciones)->toHaveCount(1)
         ->and($variaciones[0])->toEqualWithDelta(-0.5, 0.001);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Racha de días cerrados (CLAUDE.md sección 5.23)
+|--------------------------------------------------------------------------
+*/
+
+it('cuenta cero días de racha sin historial', function () {
+    expect(app(TrendAnalyticsService::class)->rachaDiasCerrados(User::factory()->create()))->toBe(0);
+});
+
+it('cuenta los días seguidos cerrados hacia atrás desde hoy', function () {
+    $usuario = User::factory()->create();
+
+    foreach ([0, 1, 2] as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'cerrado' => true,
+            'cerrado_en' => now()->subDays($atras),
+        ]);
+    }
+
+    expect(app(TrendAnalyticsService::class)->rachaDiasCerrados($usuario))->toBe(3);
+});
+
+it('hoy sin cerrar no rompe la racha, porque el día sigue en curso', function () {
+    $usuario = User::factory()->create();
+
+    foreach ([1, 2] as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'cerrado' => true,
+            'cerrado_en' => now()->subDays($atras),
+        ]);
+    }
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+        'cerrado' => false,
+    ]);
+
+    expect(app(TrendAnalyticsService::class)->rachaDiasCerrados($usuario))->toBe(2);
+});
+
+it('un día anterior sin cerrar corta la racha ahí', function () {
+    $usuario = User::factory()->create();
+
+    foreach ([1, 2, 4, 5] as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'cerrado' => true,
+            'cerrado_en' => now()->subDays($atras),
+        ]);
+    }
+
+    // El día -3 no existe: la racha son solo -1 y -2.
+    expect(app(TrendAnalyticsService::class)->rachaDiasCerrados($usuario))->toBe(2);
+});
+
+it('un día abierto en medio también corta la racha', function () {
+    $usuario = User::factory()->create();
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDay()->toDateString(),
+        'cerrado' => true,
+        'cerrado_en' => now()->subDay(),
+    ]);
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->subDays(2)->toDateString(),
+        'cerrado' => false,
+    ]);
+
+    expect(app(TrendAnalyticsService::class)->rachaDiasCerrados($usuario))->toBe(1);
+});

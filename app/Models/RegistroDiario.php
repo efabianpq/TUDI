@@ -16,7 +16,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'ingredientes_desayuno',
     'ingredientes_almuerzo',
     'ingredientes_cena',
-    'reparto_comidas',
     'calorias_objetivo_dia',
     'calorias_consumidas',
     'calorias_actividad_ajustada',
@@ -55,7 +54,6 @@ class RegistroDiario extends Model
             'grasa_consumida_g' => 'decimal:2',
             'carbohidratos_objetivo_g' => 'decimal:2',
             'carbohidratos_consumidos_g' => 'decimal:2',
-            'reparto_comidas' => 'array',
             'cerrado' => 'boolean',
             'cerrado_en' => 'datetime',
         ];

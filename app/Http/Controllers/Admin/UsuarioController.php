@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ActualizarUsuarioRequest;
 use App\Models\User;
 use App\Services\CuentaService;
+use App\Services\PlanService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,6 +25,7 @@ class UsuarioController extends Controller
 
     public function __construct(
         private readonly CuentaService $cuentas,
+        private readonly PlanService $planes,
     ) {}
 
     /**
@@ -79,17 +81,28 @@ class UsuarioController extends Controller
     }
 
     /**
-     * Genera un código nuevo: el anterior deja de servir.
+     * Da o quita Premium a mano.
+     *
+     * Es una manija provisional: cuando exista la pasarela de pago, quien mueva
+     * el plan será el cobro y no la consola. Mientras tanto hace falta alguna
+     * forma de habilitar una cuenta —pilotos, soporte, una prueba que se quedó
+     * corta—, y el sitio honesto para eso es PlanService, que es el único dueño
+     * de las transiciones de plan (sección 5.18).
+     *
+     * No toca `estado` ni borra nada: quitar Premium deja al usuario en Gratis
+     * con su cuenta y su historial intactos.
      */
-    public function regenerarCodigo(Request $request, User $usuario): RedirectResponse
+    public function plan(Request $request, User $usuario): RedirectResponse
     {
-        $this->noSobreUnoMismo($request, $usuario);
+        if ($usuario->tienePremium()) {
+            $this->planes->degradarAGratis($usuario);
 
-        $codigo = $this->cuentas->regenerarCodigo($usuario);
+            return Redirect::back()->with('status', 'plan-degradado');
+        }
 
-        return Redirect::back()
-            ->with('status', 'codigo-regenerado')
-            ->with('codigo-generado', $codigo);
+        $this->planes->activarPremium($usuario);
+
+        return Redirect::back()->with('status', 'plan-premium');
     }
 
     public function destroy(Request $request, User $usuario): RedirectResponse

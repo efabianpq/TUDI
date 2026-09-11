@@ -110,6 +110,10 @@ class DashboardController extends Controller
             'errorResumen' => $errorResumen,
             'estadoComidas' => $this->estadoComidas($registroDiario),
             'metricas' => $this->tendencias->calcular($usuario),
+            // Días seguidos cerrados (sección 5.23).
+            'racha' => $this->tendencias->rachaDiasCerrados($usuario),
+            // "No reportaste la cena de ayer" (sección 5.24).
+            'avisoAyer' => $this->comidasSinReportarAyer($usuario),
             'serie' => $this->tendencias->serieHistorica(
                 $usuario,
                 $premium ? self::DIAS_GRAFICO : self::DIAS_GRAFICO_GRATIS,
@@ -129,6 +133,39 @@ class DashboardController extends Controller
                 )->where('estado', 'pendiente')->latest()->get()
                 : collect(),
         ]);
+    }
+
+    /**
+     * El plan de ayer y las comidas que quedaron sin reportar en él, o null si
+     * no hay nada que avisar (CLAUDE.md sección 5.24).
+     *
+     * Sirve para dos cosas a la vez: el historial gana calidad —una comida sin
+     * reportar es un día con menos calorías de las que se comieron, y ese hueco
+     * entra luego en el promedio móvil— y el usuario se entera de que puede
+     * arreglarlo, que es justo lo que "reabrir" permite. Se mira solo el día
+     * anterior: recordar lo de hace tres días ya no es fiable.
+     *
+     * @return array{registro: RegistroDiario, comidas: array<int, string>}|null
+     */
+    private function comidasSinReportarAyer($usuario): ?array
+    {
+        $ayer = RegistroDiario::where('usuario_id', $usuario->id)
+            ->whereDate('fecha', now()->subDay()->toDateString())
+            ->first();
+
+        if ($ayer === null) {
+            return null;
+        }
+
+        $comidas = $this->cierre->comidasSinReportar($ayer);
+
+        // Un día en el que no se reportó absolutamente nada no es un descuido:
+        // es un día que no se usó, y recordárselo sería ruido.
+        if ($comidas === [] || count($comidas) === count(MealPlanGeneratorService::DISTRIBUCION_COMIDAS)) {
+            return null;
+        }
+
+        return ['registro' => $ayer, 'comidas' => $comidas];
     }
 
     /**

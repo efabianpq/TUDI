@@ -91,24 +91,33 @@ it('suspende una cuenta sin borrar sus datos', function () {
         ->and($usuario->fresh()->registrosDiarios)->toHaveCount(1);
 });
 
-it('regenera el código y deja de servir el anterior', function () {
+it('habilita y deshabilita Premium a mano', function () {
     $admin = User::factory()->administradora()->create();
-    $pendiente = User::factory()->pendiente('WXYZ2345')->create();
+    $usuario = User::factory()->gratis()->create();
 
     $this->actingAs($admin)
-        ->post(route('admin.usuarios.codigo', $pendiente))
-        ->assertSessionHas('status', 'codigo-regenerado');
+        ->post(route('admin.usuarios.plan', $usuario))
+        ->assertSessionHas('status', 'plan-premium');
 
-    $nuevo = $pendiente->fresh()->codigo_activacion;
+    expect($usuario->fresh()->tienePremium())->toBeTrue();
 
-    expect($nuevo)->toHaveLength(8)->not->toBe('WXYZ2345');
+    $this->actingAs($admin)
+        ->post(route('admin.usuarios.plan', $usuario))
+        ->assertSessionHas('status', 'plan-degradado');
 
-    // El anterior ya no activa nada. Se recarga el modelo porque `actingAs`
-    // fija esa instancia como usuario de las peticiones siguientes y la de
-    // memoria todavía lleva el código viejo (CLAUDE.md sección 4.10).
-    $this->actingAs($pendiente->fresh())
-        ->post(route('activacion.store'), ['codigo' => 'WXYZ2345'])
-        ->assertSessionHasErrors('codigo');
+    expect($usuario->fresh()->tienePremium())->toBeFalse()
+        ->and($usuario->fresh()->plan)->toBe(User::PLAN_GRATIS);
+});
+
+it('quitar Premium no cierra la cuenta ni borra su historial', function () {
+    $admin = User::factory()->administradora()->create();
+    $usuario = User::factory()->create();
+    RegistroDiario::factory()->for($usuario, 'usuario')->create();
+
+    $this->actingAs($admin)->post(route('admin.usuarios.plan', $usuario));
+
+    expect($usuario->fresh()->estado)->toBe(User::ESTADO_ACTIVO)
+        ->and($usuario->fresh()->registrosDiarios)->toHaveCount(1);
 });
 
 it('promueve y degrada administradores', function () {

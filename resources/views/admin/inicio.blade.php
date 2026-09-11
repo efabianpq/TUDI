@@ -79,10 +79,6 @@
                                     <button type="submit" class="tudi-btn tudi-btn-primary">{{ __('Activar ahora') }}</button>
                                 </form>
 
-                                <form method="post" action="{{ route('admin.usuarios.codigo', $usuario) }}">
-                                    @csrf
-                                    <button type="submit" class="tudi-btn tudi-btn-secondary">{{ __('Generar otro código') }}</button>
-                                </form>
                             </div>
                         </li>
                     @endforeach

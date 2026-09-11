@@ -3,6 +3,7 @@
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use App\Services\MealDistributionService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -92,14 +93,14 @@ test('logging a comida real updates calorias_consumidas on the registro diario',
     expect((float) $registroDiario->fresh()->calorias_consumidas)->toBe(1350.0);
 });
 
-test('a calorie excess at breakfast reduces the calorie budget of the still-pending lunch and dinner', function () {
+test('registrar una comida ya no reescribe en silencio el presupuesto de las pendientes', function () {
     $usuario = User::factory()->create();
     $registroDiario = registroConPlanes($usuario, desayuno: ['calorias_estimadas' => 500]);
     $desayuno = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->first();
     $almuerzo = $registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->first();
     $cena = $registroDiario->planesComida()->where('tipo_comida', 'cena')->first();
 
-    // 200 kcal excess over the 500 kcal planned for breakfast.
+    // 200 kcal por encima de las 500 planificadas para el desayuno.
     $this->actingAs($usuario)->post(route('comida-real.store', $desayuno), [
         'calorias_reales' => 700,
         'proteina_g' => 30,
@@ -107,13 +108,30 @@ test('a calorie excess at breakfast reduces the calorie budget of the still-pend
         'carbohidratos_g' => 50,
     ]);
 
-    // Excess is distributed proportionally to each pending meal's planned share
-    // (almuerzo 800 of 1500 pending, cena 700 of 1500 pending).
-    expect((float) $almuerzo->fresh()->calorias_estimadas)
-        ->toEqualWithDelta(800 - 200 * (800 / 1500), 0.01)
-        ->and((float) $cena->fresh()->calorias_estimadas)
-        ->toEqualWithDelta(700 - 200 * (700 / 1500), 0.01)
+    // Un PlanComida persistido significa exactamente lo que dice: sus calorías
+    // son las de sus ingredientes (CLAUDE.md sección 5.3). El exceso se ve en el
+    // saldo del día y lo reparte "Calcular mi plan", que sí regenera las comidas.
+    expect((float) $almuerzo->fresh()->calorias_estimadas)->toBe(800.0)
+        ->and((float) $cena->fresh()->calorias_estimadas)->toBe(700.0)
         ->and((float) $desayuno->fresh()->calorias_estimadas)->toBe(500.0);
+});
+
+test('el exceso del desayuno sí se descuenta del saldo del día', function () {
+    $usuario = User::factory()->create();
+    $registroDiario = registroConPlanes($usuario, desayuno: ['calorias_estimadas' => 500]);
+    $desayuno = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->first();
+
+    $this->actingAs($usuario)->post(route('comida-real.store', $desayuno), [
+        'calorias_reales' => 700,
+        'proteina_g' => 30,
+        'grasa_g' => 15,
+        'carbohidratos_g' => 50,
+    ]);
+
+    $saldo = app(MealDistributionService::class)->saldoDelDia($registroDiario->fresh());
+
+    expect($saldo['consumido']['calorias'])->toBe(700.0)
+        ->and($saldo['comidas_pendientes'])->toBe(['almuerzo', 'cena']);
 });
 
 test('logging a comida real with an image leaves it accessible at the expected public path', function () {

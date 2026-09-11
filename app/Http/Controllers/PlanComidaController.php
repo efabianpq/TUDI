@@ -8,9 +8,10 @@ use App\Exceptions\NegativeCarbohydrateException;
 use App\Exceptions\NoIngredientsAvailableException;
 use App\Http\Requests\DistribucionDiaRequest;
 use App\Http\Requests\RegistroPesoRequest;
-use App\Http\Requests\RepartoComidasRequest;
 use App\Models\RegistroDiario;
 use App\Services\ActivitySuggestionService;
+use App\Services\ComidasFrecuentesService;
+use App\Services\CuotaIaService;
 use App\Services\DailyClosureService;
 use App\Services\MealDistributionService;
 use App\Services\MealPlanGeneratorService;
@@ -22,7 +23,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
-use InvalidArgumentException;
 
 /**
  * "Planes diarios" (CLAUDE.md sección 4.12): el histórico de días del usuario y
@@ -35,8 +35,10 @@ use InvalidArgumentException;
  *         distribución generada con IA en una sola pasada (MealDistributionService).
  *      2. Actividad física — la sugerencia derivada de la Calculadora Déficit
  *         (ActivitySuggestionService) y el registro de lo que se hizo.
- *      3. Cierre del día — el feedback de cumplimiento y el resumen
- *         (DailyClosureService + CierreFeedbackService, vía CierreDiarioController).
+ *      2b. Reporte de comidas — el cierre de cada comida por separado
+ *         (ReporteComidaService, vía ReporteComidaController).
+ *      3. Cierre del día — la consolidación de lo reportado, sin IA
+ *         (DailyClosureService, vía CierreDiarioController).
  *
  * La clase conserva su nombre aunque la sección se llame ahora "Planes
  * diarios": el cambio es de cara al usuario, y renombrarla solo añadiría ruido
@@ -62,6 +64,8 @@ class PlanComidaController extends Controller
         private readonly DailyClosureService $cierre,
         private readonly RepartoComidasService $reparto,
         private readonly PlanDiarioService $planDiario,
+        private readonly CuotaIaService $cuotas,
+        private readonly ComidasFrecuentesService $frecuentes,
     ) {}
 
     /**
@@ -116,9 +120,19 @@ class PlanComidaController extends Controller
             'actividad' => null,
             'actividades' => $registroDiario->actividadesFisicas()->latest()->get(),
             'resumenCierre' => null,
-            // Reparto vigente del día y si es el de fábrica (sección 5.14).
+            // Cómo quedó repartido el día y por qué (sección 5.14): el reparto
+            // ya no lo teclea nadie, lo deriva RepartoComidasService.
             'reparto' => $this->reparto->paraElDia($registroDiario),
-            'repartoDeFabrica' => $this->reparto->deFabrica(),
+            'explicacionReparto' => $this->reparto->explicacion($registroDiario),
+            // Saldo por macro de lo que queda del día (sección 5.21).
+            'saldo' => null,
+            // Comidas del día todavía sin reportar (sección 5.5).
+            'comidasSinReportar' => $this->cierre->comidasSinReportar($registroDiario),
+            // Cuánta IA le queda hoy al usuario (sección 5.20).
+            'cuotaDistribucion' => $this->cuotas->restantes($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION),
+            'cuotaReporte' => $this->cuotas->restantes($usuario, CuotaIaService::CONCEPTO_REPORTE),
+            'limiteDistribucion' => $this->cuotas->limite(CuotaIaService::CONCEPTO_DISTRIBUCION),
+            'limiteReporte' => $this->cuotas->limite(CuotaIaService::CONCEPTO_REPORTE),
             // Por qué la sección de recomendaciones está vacía (sección 5.6).
             'diagnosticoRecomendaciones' => null,
         ];
@@ -136,6 +150,7 @@ class PlanComidaController extends Controller
                 $datos['objetivos']['dia']['calorias_objetivo'],
             );
             $datos['resumenCierre'] = $this->cierre->resumen($registroDiario);
+            $datos['saldo'] = $this->distribucion->saldoDelDia($registroDiario);
             $datos['diagnosticoRecomendaciones'] = $this->cierre->diagnosticoRecomendaciones($registroDiario);
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {
             $datos['errorPerfil'] = $e->getMessage();
@@ -143,36 +158,9 @@ class PlanComidaController extends Controller
             return view('planes.show', $datos);
         }
 
-        $datos['comidas'] = $this->comidasDelDia($registroDiario, $datos['objetivos']);
+        $datos['comidas'] = $this->comidasDelDia($registroDiario, $datos['objetivos'], $usuario);
 
         return view('planes.show', $datos);
-    }
-
-    /**
-     * Reparto de calorías entre las tres comidas de ESTE día (sección 5.14).
-     *
-     * Cambiarlo no recalcula ningún plan ya generado —sus macros están
-     * persistidos—: redimensiona los objetivos que se muestran y el presupuesto
-     * de lo que quede por generar. Se permite sobre un día cerrado por el mismo
-     * motivo que el peso: no altera ninguna cifra del cierre.
-     */
-    public function reparto(RepartoComidasRequest $request, RegistroDiario $registroDiario): RedirectResponse
-    {
-        $this->autorizar($request, $registroDiario);
-
-        try {
-            $this->reparto->guardar(
-                $registroDiario,
-                (array) $request->validated('reparto'),
-                (bool) $request->validated('como_habitual', false),
-            );
-        } catch (InvalidArgumentException $e) {
-            // El servicio es la última palabra sobre qué reparto es válido y su
-            // mensaje ya es legible.
-            return Redirect::route('planes.show', $registroDiario)->with('error', $e->getMessage());
-        }
-
-        return Redirect::route('planes.show', $registroDiario)->with('status', 'reparto-guardado');
     }
 
     /**
@@ -183,6 +171,14 @@ class PlanComidaController extends Controller
     public function resetear(Request $request, RegistroDiario $registroDiario): RedirectResponse
     {
         $this->autorizar($request, $registroDiario);
+
+        // Solo el día de hoy se reinicia: un día pasado ya no puede volver a
+        // vivirse, así que vaciarlo solo borraría historial. La vista ni siquiera
+        // pinta el botón, pero la ruta llega por POST y eso no basta.
+        if (! $registroDiario->fecha->isToday()) {
+            return Redirect::route('planes.show', $registroDiario)
+                ->with('error', __('Solo puedes reiniciar el plan de hoy. Para deshacerte de un día anterior, elimínalo.'));
+        }
 
         $this->planDiario->resetear($registroDiario);
 
@@ -203,14 +199,16 @@ class PlanComidaController extends Controller
     }
 
     /**
-     * "Generar distribución": guarda el texto de las tres comidas y pide al
-     * motor de IA, en una sola llamada, el reparto de las que haga falta
-     * resolver. Un mismo botón hace las dos cosas para que el usuario no tenga
-     * que guardar y luego generar.
+     * "Ajustar mi plan": guarda el texto de las tres comidas y pide al motor de
+     * IA, en una sola llamada, el reparto de las que haga falta resolver. Un
+     * mismo botón hace las dos cosas para que el usuario no tenga que guardar y
+     * luego generar.
      *
-     * Las comidas ya resueltas cuyo texto no cambió se dejan intactas y su
-     * presupuesto se descuenta; las que aún no tienen texto reservan el suyo
-     * (sección 4.12).
+     * Ajustar, y no solo generar: antes de repartir se mide cuánto queda del
+     * objetivo del día después de las comidas ya cerradas, y es ESE saldo el
+     * que se reparte entre las que faltan (sección 5.3). Una comida cerrada no
+     * se toca mientras siga cerrada; las que aún no tienen texto reservan su
+     * parte para cuando se escriban.
      */
     public function distribuir(DistribucionDiaRequest $request, RegistroDiario $registroDiario): RedirectResponse
     {
@@ -233,7 +231,7 @@ class PlanComidaController extends Controller
             return Redirect::route('calculadora.edit')->with('error', $e->getMessage());
         }
 
-        return Redirect::route('planes.show', $registroDiario)->with('status', 'distribucion-generada');
+        return Redirect::route('planes.show', $registroDiario)->with('status', 'plan-ajustado');
     }
 
     /**
@@ -330,7 +328,7 @@ class PlanComidaController extends Controller
      * @param  array{por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}  $objetivos
      * @return array<int, array<string, mixed>>
      */
-    private function comidasDelDia(RegistroDiario $registroDiario, array $objetivos): array
+    private function comidasDelDia(RegistroDiario $registroDiario, array $objetivos, $usuario): array
     {
         $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
 
@@ -338,6 +336,7 @@ class PlanComidaController extends Controller
 
         foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
             $plan = $planes->get($tipoComida);
+            $cerrada = $plan?->comidaReal !== null;
 
             $comidas[] = [
                 'tipo' => $tipoComida,
@@ -345,11 +344,19 @@ class PlanComidaController extends Controller
                 'objetivos' => $objetivos['por_comida'][$tipoComida],
                 'texto' => $registroDiario->{'ingredientes_'.$tipoComida},
                 'plan' => $plan,
+                // Un PlanComida con origen "reporte" existe solo para colgar de
+                // él lo que se comió: no hay ninguna sugerencia que enseñar.
+                'sinPlanPrevio' => $plan?->esReporteSinPlan() ?? false,
                 'estado' => match (true) {
+                    $cerrada => 'registrada',
                     $plan === null => 'pendiente',
-                    $plan->comidaReal !== null => 'registrada',
                     default => 'planificada',
                 },
+                // Comidas frecuentes de ese tipo, para cerrarla sin gastar una
+                // llamada (sección 5.22). No se buscan si ya está cerrada.
+                'frecuentes' => $cerrada
+                    ? collect()
+                    : $this->frecuentes->paraComida($usuario, $tipoComida),
             ];
         }
 

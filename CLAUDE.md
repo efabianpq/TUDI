@@ -17,6 +17,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 - **Sesiones:** `SESSION_DRIVER=database`. **Nunca `file` en producción**: ese driver serializa las peticiones de una misma sesión y, con llamadas a la IA de varios segundos, dos pestañas bastan para provocar un 504 (sección 5.13).
 - **Tareas programadas:** Laravel Task Scheduling vía un único cron de Hostinger (`schedule:run`). Sin Redis ni colas externas: la cola de correos usa el driver `database` y se vacía cada minuto desde ese mismo cron con `queue:work --stop-when-empty --max-time=50 --tries=3` (termina en cuanto no hay trabajo, y `--max-time=50` evita solaparse con la ejecución del minuto siguiente aunque falle `withoutOverlapping()`).
 - **Timezone:** `America/Bogota` (GMT-5) por defecto — de ahí depende dónde cae la medianoche que decide "hoy" en todo el dominio. La suite de tests corre en la misma zona.
+- **Idioma:** `APP_LOCALE=es` (con `en` de *fallback*). Toda la interfaz está en español, incluidas las pantallas de Breeze (login, registro, recuperación de contraseña) y los mensajes de validación del framework — `lang/es.json` y `lang/es/{auth,passwords,validation,pagination}.php`. Un texto nuevo sin traducir cae al inglés de Laravel, así que cualquier vista o mensaje nuevo necesita su entrada ahí.
 - **Instalable como app:** manifest + metas de Apple + iconos del isotipo (sección 5.12). Sin service worker ni funcionamiento offline.
 - **Almacenamiento de imágenes:** disco local vía `Storage` facade (`storage/app/public`, con `storage:link`). Nunca rutas hardcodeadas.
 - **Testing:** Pest sobre PHPUnit.
@@ -30,16 +31,18 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Ciclo de vida de la cuenta | `app/Services/CuentaService.php`, `app/Http/Controllers/ActivacionController.php`, `app/Http/Middleware/EnsureCuentaActiva.php`, `app/Notifications/*` |
 | Plan del usuario y prueba de Premium | `app/Services/PlanService.php`, `config/planes.php`, `app/Console/Commands/ExpirarPruebas.php` (`app:expirar-pruebas`, `dailyAt('00:45')`) |
 | Control de acceso a las funciones de IA | `app/Services/AI/PremiumGatedMealDistributionProvider.php` + `PremiumGatedTranscripcionProvider.php` (decoradores bindeados en `AppServiceProvider`) |
+| Cuota diaria de llamadas a la IA | `app/Services/CuotaIaService.php`, `app/Services/AI/CuotaDiariaMealDistributionProvider.php` |
 | Landing pública | `app/Http/Controllers/LandingController.php`, `resources/views/welcome.blade.php` |
 | Cálculo nutricional | `app/Services/NutritionCalculatorService.php` (fuente de verdad, sección 7) |
 | Calculadora Déficit | `app/Http/Controllers/ProfileParametersController.php` (rutas `/calculadora`) |
 | Planes diarios (hub del día) | `app/Http/Controllers/PlanComidaController.php`, compone `MealDistributionService` + `ActivitySuggestionService` + `DailyClosureService` |
 | Ciclo de vida de un plan diario | `app/Services/PlanDiarioService.php` (reiniciar / eliminar el día) |
-| Reparto entre comidas | `app/Services/RepartoComidasService.php` |
-| Distribución de comidas con IA | `app/Services/MealDistributionService.php`, `app/Services/AI/MealDistributionProviderInterface.php` + `OpenAiMealDistributionProvider.php` (vigente) |
+| Reparto automático entre comidas | `app/Services/RepartoComidasService.php` |
+| Ajuste del plan con IA | `app/Services/MealDistributionService.php`, `app/Services/AI/MealDistributionProviderInterface.php` + `OpenAiMealDistributionProvider.php` (vigente) |
 | Registro de comida real | `app/Services/ComidaRealService.php`, `app/Models/PlanComida.php`, `app/Models/ComidaReal.php` |
 | Actividad física | `app/Services/ActivitySuggestionService.php`, `app/Services/ActivityCorrectionService.php`, `app/Models/ActividadFisica.php` |
-| Cierre diario | `app/Services/DailyClosureService.php`, `app/Services/CierreFeedbackService.php`, `app/Console/Commands/RunDailyClosure.php` (`dailyAt('00:15')`) |
+| Reporte y cierre de cada comida | `app/Services/ReporteComidaService.php`, `app/Http/Controllers/ReporteComidaController.php`, `app/Services/ComidasFrecuentesService.php` |
+| Cierre diario | `app/Services/DailyClosureService.php`, `app/Console/Commands/RunDailyClosure.php` (`dailyAt('00:15')`) |
 | Motor de recomendaciones | `app/Services/RulesEngineService.php`, `app/Http/Controllers/RecomendacionSistemaController.php` |
 | Analítica de tendencias | `app/Services/TrendAnalyticsService.php`, `app/Services/SeguimientoService.php`, `app/Console/Commands/CalculateTrends.php` (`dailyAt('00:30')`) |
 | Inicio (dashboard) | `app/Http/Controllers/DashboardController.php` |
@@ -59,9 +62,9 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 `Usuario` 1—N `MetricaTendencia`
 
 - **Nombres de tabla explícitos** (`protected $table`) porque el pluralizador de Laravel no acierta con compuestos en español: `registros_diarios`, `planes_comida`, `comidas_reales`, `actividades_fisicas`, `metricas_tendencia`, `recomendaciones_sistema`, `ingredientes_disponibles` (sin usar, sección 6), `parametros_maestros`.
-- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora), `reparto_comidas` (json nullable, el reparto habitual — sección 5.14), administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1) y **plan** (`plan` enum(gratis,trial,premium) default `gratis`, `plan_expira_en` timestamp nullable — sección 5.18). `estado` y `plan` son dos dimensiones distintas: el primero decide **si** entra, el segundo **qué** funciones tiene.
-- **`registros_diarios`**: `usuario_id` + `fecha` (único), `peso_kg` del día, el snapshot del cierre (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, y objetivo/consumido de los tres macros: `proteina_objetivo_g`/`proteina_consumida_g`, `grasa_objetivo_g`/`grasa_consumida_g`, `carbohidratos_objetivo_g`/`carbohidratos_consumidos_g`), `cerrado` + `cerrado_en`, `ingredientes_desayuno`/`ingredientes_almuerzo`/`ingredientes_cena` (texto libre por comida) y `reparto_comidas` (json nullable, el reparto de ese día).
-- **`planes_comida`**: `tipo_comida` enum(desayuno,almuerzo,cena,snack), macros estimados, `descripcion` + `preparacion` + `notas_ia`, `ingredientes_detalle` (json, snapshot denormalizado a propósito — sigue siendo legible aunque se editen los ingredientes de origen).
+- **`users`**: perfil nutricional (`peso_kg`, `estatura_m`, `edad`, `sexo`, `nivel_actividad`, `tipo_deficit`, `valor_deficit`, `proteina_factor`, `grasa_factor`, `calorias_objetivo` — todas nullable hasta completar la Calculadora), administración (`rol` enum(usuario,admin), `estado` enum(pendiente,activo,suspendido) default `activo`, `codigo_activacion`, `activado_en` — sección 5.1) y **plan** (`plan` enum(gratis,trial,premium) default `gratis`, `plan_expira_en` timestamp nullable — sección 5.18). `estado` y `plan` son dos dimensiones distintas: el primero decide **si** entra, el segundo **qué** funciones tiene.
+- **`registros_diarios`**: `usuario_id` + `fecha` (único), `peso_kg` del día, el snapshot del cierre (`calorias_objetivo_dia`, `calorias_consumidas`, `calorias_actividad_ajustada`, `deficit_diario`, y objetivo/consumido de los tres macros: `proteina_objetivo_g`/`proteina_consumida_g`, `grasa_objetivo_g`/`grasa_consumida_g`, `carbohidratos_objetivo_g`/`carbohidratos_consumidos_g`), `cerrado` + `cerrado_en`, `ingredientes_desayuno`/`ingredientes_almuerzo`/`ingredientes_cena` (texto libre por comida).
+- **`planes_comida`**: `tipo_comida` enum(desayuno,almuerzo,cena,snack), `origen` enum(plan,reporte) default `plan`, macros estimados, `descripcion` + `preparacion` + `notas_ia`, `ingredientes_detalle` (json, snapshot denormalizado a propósito — sigue siendo legible aunque se editen los ingredientes de origen). `origen = reporte` marca la fila que existe solo para colgar de ella una `ComidaReal` de una comida que nunca se planificó (sección 5.5): sus macros estimados son cero porque no se sugirió nada, y al reabrir la comida se borra entera.
 - **`comidas_reales`**: `plan_comida_id` único (relación 1—1, nunca se sobrescribe el plan), macros reales, `consumido_en`, `notas`, `imagen_evidencia`.
 - **`actividades_fisicas`**: `calorias_dispositivo`, `factor_correccion` (0.8–0.9), `calorias_ajustadas`, `pasos`, `fuente` enum(manual,dispositivo).
 - **`metricas_tendencia`**: promedios móviles de 7 días (`promedio_movil_peso_kg`, `promedio_movil_calorias`, `promedio_movil_deficit_kcal`), `indice_consistencia_pct`, `dias_con_datos`, `porcentaje_perdida_semanal`, `tendencia` enum.
@@ -99,45 +102,73 @@ Primer paso del flujo, dimensiona todo lo demás. `ProfileParametersController` 
 - Se ve en toda la plataforma junto al nombre del usuario en la navegación.
 - Campos decimales (peso, estatura, proteína, grasa) son `type="text" inputmode="decimal"`, nunca `type="number"` — ver sección 9.
 
-### 5.3 Planes diarios: comidas y distribución con IA (`/planes`)
+### 5.3 Planes diarios: comidas y ajuste del plan con IA (`/planes`)
 
-**"Planes diarios" es el menú; un plan diario es un `RegistroDiario` con todo su día dentro.** `PlanComidaController`: listado paginado (`GET /planes`), crear el de hoy (`POST /planes`), detalle-hub (`GET /planes/{registroDiario}`) con tres secciones: cálculo alimenticio, actividad física, cierre. 403 si el plan no es del usuario.
+**"Planes diarios" es el menú; un plan diario es un `RegistroDiario` con todo su día dentro.** `PlanComidaController`: listado paginado (`GET /planes`), crear el de hoy (`POST /planes`), detalle-hub (`GET /planes/{registroDiario}`) con cuatro secciones: cálculo alimenticio, reporte de comidas, actividad física, cierre. 403 si el plan no es del usuario.
 
-**Cálculo alimenticio.** El usuario escribe (o dicta) un párrafo por comida y pulsa **un único** "Generar distribución" — las tres comidas viajan juntas en una sola llamada al proveedor, porque el reparto del día es un solo problema de asignación. `MealDistributionService::distribuirDia()` clasifica cada comida:
+**Cálculo alimenticio.** El usuario escribe (o dicta) un párrafo por comida y pulsa **un único** "Calcular mi plan" — las tres comidas viajan juntas en una sola llamada al proveedor, porque el reparto del día es un solo problema de asignación. Se llama *calcular* y no *generar* porque lo que reparte es el **saldo** del día: `MealDistributionService::distribuirDia()` clasifica cada comida y descuenta primero lo que ya se comió de verdad.
 
 | Clase | Cuándo | Presupuesto |
 |---|---|---|
-| fija | ya resuelta y texto sin cambios, o ya tiene `ComidaReal` | se descuenta del día, no se toca |
-| a generar | texto nuevo/cambiado, o pedida con `rehacer` | recibe su parte proporcional del 25/40/35 |
+| fija | ya cerrada (tiene `ComidaReal`), o ya resuelta y con el texto sin cambios | se descuenta del día con sus cifras **reales**, no se toca |
+| a generar | texto nuevo/cambiado, pedida con `rehacer`, **o abierta cuando el saldo del día se movió** | recibe su parte proporcional del reparto vigente |
 | reservada | sin texto todavía | se aparta su parte, no se resuelve |
 
-- `MealPlanGeneratorService::DISTRIBUCION_COMIDAS` (`desayuno 0.25 / almuerzo 0.40 / cena 0.35`) declara qué comidas hay y el reparto **de fábrica**; cuál rige en cada día lo resuelve `RepartoComidasService` (sección 5.14).
-- "Rehacer solo el X" fuerza a regenerar una comida sin texto nuevo; una comida con `ComidaReal` nunca se regenera.
+- **Una comida cerrada no se toca mientras lo esté** (sección 5.5): ni se regenera ni se le reescribe el texto de ingredientes, ni siquiera si llega en la petición. Para cambiarla hay que reabrirla.
+- **El saldo movido rehace lo que falta.** Si una comida cerrada se comió por una cifra distinta de la planificada (más de `TOLERANCIA_SALDO_KCAL`, 1 kcal de ruido de redondeo), las comidas abiertas con texto se regeneran aunque su texto no haya cambiado: se generaron contra un presupuesto que ya no es el que queda, y arreglarlo es justo para lo que existe el botón. Una comida cerrada con "cumplí lo sugerido" no lo dispara —lo real y lo planificado coinciden—, así que pulsar sin que haya pasado nada sigue sin gastar una llamada.
+- `MealPlanGeneratorService::DISTRIBUCION_COMIDAS` (`desayuno 0.30 / almuerzo 0.40 / cena 0.30`) declara qué comidas hay y el reparto **balanceado de partida**; cuál rige en cada día lo deriva `RepartoComidasService` a partir de la actividad física registrada (sección 5.14).
+- "Rehacer solo el X" fuerza a regenerar una comida sin texto nuevo; una comida cerrada nunca se regenera.
 - Los presupuestos por comida y los totales de cada plan los calcula **PHP**, nunca el modelo (regla 7, sección 13).
-- **`OpenAiMealDistributionProvider`** (vigente): `chat/completions` con salida estructurada **estricta** (`response_format.json_schema`, `strict: true`), `temperature = 0.1`, `max_completion_tokens`, `OPENAI_MODEL=gpt-4.1`. Timeout 20 s / connect 5 s (sección 5.13). Ningún fallo produce 500: `MealDistributionUnavailableException` cubre sin clave, fallo del proveedor, negativa explícita (`refusal`), filtro de contenido, corte por longitud, respuesta ininterpretable o "nada que distribuir". El texto del usuario se guarda aunque la generación falle. `GeminiMealDistributionProvider` y `ClaudeMealDistributionProvider` siguen en el repo sin bindear (sección 6).
+- **Cuota diaria**: cada pulsación es una llamada facturable y gasta una unidad de `ia_limite_distribuciones_dia` (sección 5.20). Sin cuota, el botón desaparece y la pantalla dice qué se puede seguir haciendo.
+- **`OpenAiMealDistributionProvider`** (vigente): `chat/completions` con salida estructurada **estricta** (`response_format.json_schema`, `strict: true`), `temperature = 0.1`, `max_completion_tokens`, `OPENAI_MODEL=gpt-4.1`. Timeout 20 s / connect 5 s (sección 5.13). Ningún fallo produce 500: `MealDistributionUnavailableException` cubre sin clave, fallo del proveedor, negativa explícita (`refusal`), filtro de contenido, corte por longitud, respuesta ininterpretable, cuota agotada o "nada que distribuir". El texto del usuario se guarda aunque la generación falle. `GeminiMealDistributionProvider` y `ClaudeMealDistributionProvider` siguen en el repo sin bindear (sección 6).
   - **El esquema se arma por llamada**, con el `enum` de los tipos de comida que de verdad se pidieron: una comida inventada ("merienda") ya no es posible ni a nivel de API. La validación en PHP sigue ahí igualmente — el esquema es de la API, no del dominio.
+  - **La comida posterior al entrenamiento va como contexto, no como otro objetivo de macros.** `contexto_dia.comida_post_actividad` le dice al modelo cuál es, para que **dentro** del presupuesto de esa comida prefiera los carbohidratos. Retocar solo los carbohidratos de una comida rompería la coherencia entre sus macros y sus calorías; lo que sí crece es su parte del día, y eso lo decide PHP (sección 5.14).
   - **Corrección de macros acotada, no reintento ciego.** PHP suma los totales de la distribución y los compara con los objetivos de las comidas resueltas (calorías y proteína, que son los dos que el dominio persigue). Si se desvían más de `OPENAI_TOLERANCIA_MACROS` (5%), se le devuelve al modelo **su propia respuesta con las sumas concretas que fallaron** —el dato que él no tiene— para que reajuste los gramos. Como mucho una corrección (`OPENAI_REINTENTOS_MACROS`), y **la corrección hereda el tiempo que sobra** de `OPENAI_PRESUPUESTO_TOTAL` (25 s) en vez de estrenar otro timeout entero: el techo total de la petición sigue por debajo del gateway (regla 10). Si aun así no cuadra, **se devuelve el mejor intento, nunca un error**: con lo que la persona tiene puede ser imposible llegar al objetivo, y ese es justo el caso que el campo `notas` explica. El prompt de corrección insiste en no inventar alimentos para cuadrar.
   - **`OPENAI_TEMPERATURE=null`** omite el parámetro del cuerpo. Hace falta con las familias de razonamiento (gpt-5, o3, o4), que rechazan con un 400 cualquier valor distinto de 1.
 - **Dictado por voz** en los textareas de ingredientes — ver sección 5.9.
-- **Registro de lo que se comió** ya no tiene botón propio por comida: se pregunta en el cierre (sección 5.5). `ComidaRealController` (`/plan/{planComida}/comida-real`) sigue existiendo sin enlazar desde la interfaz, para corregir macros a mano si hace falta.
+- **Lo que se comió se reporta comida a comida** en su propia sección (sección 5.5). `ComidaRealController@create`/`@store` (`/plan/{planComida}/comida-real`) sigue existiendo sin enlazar desde la interfaz, para corregir macros a mano si hace falta.
 - **Peso del día** (`POST /planes/{registroDiario}/peso`) vive en el panel de objetivo del plan diario, no en pantalla propia; no toca `users.peso_kg` (el de perfil).
-- **Guardado sin recargar:** los formularios `data-fetch` (distribución, peso) se envían por `fetch` y reemplazan `#tudi-avisos`/`#panel-objetivo`/`#lista-comidas`/`#seccion-actividad`/`#seccion-cierre` con la respuesta; sin JS se envían normal.
+- **Guardado sin recargar:** los formularios `data-fetch` (ajuste del plan, cierre y reapertura de cada comida, peso) se envían por `fetch` y reemplazan `#tudi-avisos`/`#panel-objetivo`/`#lista-comidas`/`#seccion-actividad`/`#seccion-cierre` con la respuesta; sin JS se envían normal. El acordeón deja **una comida abierta a la vez**: como cada tarjeta lleva dentro su plan y su cierre, abrir una y plegar el resto es lo que evita tener media pantalla de formularios.
 
 ### 5.4 Actividad física
 
 `ActivitySuggestionService::sugerir()` propone actividad para el día (no persiste nada, no toca `calorias_objetivo`): objetivo = una parte del déficit dietético (mantenimiento − objetivo vigente), acotado entre un suelo y un techo — ambos ajustables desde parámetros maestros (sección 5.11) —, con duraciones por la fórmula MET estándar. `ActividadFisicaController@store` (`POST /planes/{registroDiario}/actividades`) registra lo real y aplica `ActivityCorrectionService::FACTORES_POR_TIPO` (0.80–0.85 según tipo, case-insensitive; un factor fuera de 0.8–0.9 se rechaza, nunca se recorta en silencio). Ambas viven agrupadas en una sola sección desplegable del plan diario, con la cabecera resumiendo lo hecho contra el objetivo sin necesidad de abrirla.
 
-### 5.5 Cierre diario
+**Lo registrado no solo se resta: reparte.** Una `ActividadFisica` del día desplaza el reparto entre comidas hacia la comida posterior al entrenamiento (sección 5.14), y esa misma comida es la que el prompt marca para priorizar carbohidratos (sección 5.3). Las calorías de la actividad siguen entrando en el déficit por donde siempre — la fórmula de la sección 7 no cambia.
 
-`DailyClosureService`: `resumen()` (vista previa si el día está abierto, snapshot congelado si está cerrado), `cerrar()` (calcula, persiste y congela; lanza `DayAlreadyClosedException` si ya estaba cerrado — no es idempotente a propósito), `reabrir()` (acción explícita, no-op si ya estaba abierto), `diagnosticoRecomendaciones()` (abajo). Las cifras se recalculan siempre desde `ComidaReal`/`ActividadFisica`, nunca desde acumuladores.
+### 5.5 Cierre de cada comida y cierre del día
 
-El snapshot congela **objetivo y consumido de los tres macros**, no solo de la proteína: la tarjeta "Resultado real del día" los muestra los cuatro, y para un día cerrado tienen que salir del snapshot y no del perfil actual. Los días cerrados antes de que existieran esas columnas devuelven `null` y se pintan como "—", nunca como cero.
+**Cada comida se cierra por separado, en cuanto se come.** Antes lo que se había comido se preguntaba todo junto al cerrar el día, cuando ya no servía para ajustar nada: hasta ese momento el almuerzo y la cena se dimensionaban contra el objetivo entero aunque el desayuno se hubiera ido 300 kcal por encima. Ahora **cada comida lo lleva todo dentro de su propia tarjeta** del cálculo alimenticio —los ingredientes, lo que se le planificó, "Rehacer solo el X" y su cierre—, porque planificar una comida y contar qué se comió en ella son dos pasos del mismo gesto; tenerlos en dos secciones obligaba a buscar la misma comida dos veces en la pantalla. Desde que una comida se cierra, sus cifras entran en el saldo del día (sección 5.21) y en el siguiente "Calcular mi plan".
 
-Antes de cerrar, `CierreFeedbackService` pregunta comida a comida **"¿Cumpliste con lo sugerido?"**: un interruptor ("sí, lo cumplí" — crea la `ComidaReal` con los macros del plan, sin llamar al proveedor) o un texto ("contar qué comí" — las comidas descritas viajan en una sola llamada a `estimarConsumoReal()`). El texto manda sobre el interruptor. **La foto de evidencia se adjunta aquí**, junto a la respuesta de cada comida (no hay ya un botón "Registrar" por comida, que preguntaba lo mismo). Una imagen sola, sin interruptor ni texto, no crea ninguna `ComidaReal`. Un fallo del proveedor deja el día sin cerrar y sin nada a medias.
+**Un solo botón que cambia de papel.** "Cerrar desayuno" abre los campos del reporte dentro de la tarjeta y se convierte en "Confirmar cierre"; con la comida ya cerrada queda "Reabrir desayuno". Así la tarjeta no enseña un formulario de reporte a quien todavía no ha comido. Visualmente es del mismo tamaño y color que "Rehacer solo el X" (`tudi-btn-primary`, ancho de su texto en escritorio): una acción normal de la tarjeta, nunca al nivel de "Calcular mi plan", que es la que reparte el día entero.
 
-**Lo respondido se ve y se puede cambiar.** El cierre lista comida a comida lo que se contestó (macros reales, notas, foto). Con el día abierto, cada respuesta lleva un **"Cambiar mi respuesta"** → `DELETE /plan/{planComida}/comida-real` (`ComidaRealService::eliminar()`, borra la `ComidaReal` y su imagen y recalcula `calorias_consumidas`), que devuelve esa comida al estado "planificada" y con ella la pregunta. Es lo que hace que reabrir un día sirva de algo: `reabrir()` no borra las `ComidaReal` a propósito, así que sin esta acción el cierre daba por buena la respuesta anterior y no volvía a preguntar nada.
+**El formulario de "Calcular mi plan" no envuelve a las tarjetas**: cada comida lleva dentro su propio \`<form>\` de cierre y un \`<form>\` no puede anidarse en otro. Los campos de ingredientes y los botones de ajuste se asocian a él por el atributo \`form=\`, que existe exactamente para esto; \`FormData\` y \`submitter\` los recogen igual, así que el guardado sin recargar no cambia.
 
-Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan, y borrarlas también; escribir texto de ingredientes, generar distribución, cambiar el reparto y registrar el peso sí se permiten (no alteran cifras del cierre). `CierreDiarioController` (`POST /planes/{registroDiario}/cierre|reabrir`). Automatizado: `app:run-daily-closure` cierra los `RegistroDiario` de ayer sin cerrar, `dailyAt('00:15')`.
+`ReporteComidaService::reportar()` + `ReporteComidaController` (`POST /planes/{registroDiario}/comidas/{tipoComida}/cerrar|reabrir`; 404 si el tipo de comida no está en `DISTRIBUCION_COMIDAS`). Cuatro caminos, y solo uno cuesta una llamada:
+
+| Camino | Qué hace | Cuota |
+|---|---|---|
+| "Cumplí lo sugerido" | `ComidaReal` con los macros del propio `PlanComida` | no gasta |
+| "Lo que sueles comer", sin tocar el texto | copia los macros de un reporte anterior (sección 5.22) | no gasta |
+| Contarlo por escrito (o "lo que sueles comer" editado) | `estimarConsumoReal()` con esa comida sola | gasta `ia_limite_reportes_dia` |
+| Sin plan previo | crea un `PlanComida` con `origen = reporte` y macros a cero para colgar de él la `ComidaReal` | según el camino |
+
+- **"Lo que sueles comer" es un atajo de escritura, no un envío.** El chip solo copia su texto en el campo "Cuéntanos qué comiste de verdad…" (con el id de aquel reporte en un campo oculto) y no manda nada por su cuenta. `ReporteComidaService::reportar()` reutiliza los macros de ese reporte anterior únicamente si el texto llega **tal cual** se copió (`ComidasFrecuentesService::coincideCon()`); en cuanto se edita o se dicta encima, el campo oculto se limpia y lo que se envía pasa por el proveedor como cualquier otro texto. Así el atajo nunca cuesta una llamada mientras siga siendo la misma comida.
+- **El texto manda** sobre el interruptor: si contó qué comió, esa es la información más fiel.
+- **La foto de evidencia se adjunta aquí.** Una imagen sola, sin decir qué se comió, no crea ninguna `ComidaReal` y devuelve un error legible.
+- **Reabrir una comida** (`ComidaRealService::eliminar()`) borra su `ComidaReal` y su imagen, recalcula `calorias_consumidas` y devuelve la comida al estado "planificada". Si el `PlanComida` era `origen = reporte`, se borra también: sin su `ComidaReal` no queda nada dentro. **Reabrir no devuelve cuota** — si la devolviera, abrir y cerrar la misma comida sería una llamada gratis infinita (sección 5.20).
+- Un segundo envío sobre una comida ya cerrada se rechaza en vez de sobrescribir: un doble clic no puede borrar lo que ya se contó.
+
+**Cerrar el día ya no llama a la IA.** `DailyClosureService`: `resumen()` (vista previa si el día está abierto, snapshot congelado si está cerrado), `cerrar()` (suma, calcula el déficit con `NutritionCalculatorService` y congela; lanza `DayAlreadyClosedException` si ya estaba cerrado — no es idempotente a propósito), `reabrir()` (acción explícita, no-op si ya estaba abierto), `comidasSinReportar()` y `diagnosticoRecomendaciones()`. Las cifras se recalculan siempre desde `ComidaReal`/`ActividadFisica`, nunca desde acumuladores. Cerrar el día es gratis, instantáneo y no puede fallar por un servicio externo.
+
+**Controles de validación del cierre** (`CierreDiarioController`), porque un día cerrado sin reportar nada no es un día sin comer sino un día sin contar, y su cero entra luego en el promedio móvil de 7 días como si fuera un dato bueno:
+
+- **Sin ninguna comida reportada** no se cierra, y se dice qué falta.
+- **Con alguna comida sin reportar** se cierra solo con `confirmar_sin_reportar`; la pantalla lista cuáles son.
+
+El snapshot congela **objetivo y consumido de los tres macros**, no solo de la proteína: la tarjeta "Resultado real del día" los muestra los cuatro, y para un día cerrado tienen que salir del snapshot y no del perfil actual. Esa tarjeta es **la única** lectura de las cifras del día: la fila de cuatro indicadores sueltos (objetivo, consumidas, déficit, proteína) que había encima se retiró porque repetía lo mismo dos veces. El déficit sí se conserva, dentro de la tarjeta: es la única cifra que las barras no dan —incluye el gasto por actividad, que no es un macro— y es el número que persigue todo el producto (sección 7). Los días cerrados antes de que existieran esas columnas devuelven `null` y se pintan como "—", nunca como cero.
+
+Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan, y borrarlas también; escribir texto de ingredientes, ajustar el plan y registrar el peso sí se permiten (no alteran cifras del cierre). `CierreDiarioController` (`POST /planes/{registroDiario}/cierre|reabrir`). Automatizado: `app:run-daily-closure` cierra los `RegistroDiario` de ayer sin cerrar, `dailyAt('00:15')` — el comando llama al servicio directamente, así que las validaciones de arriba son del camino web, no del dominio.
 
 ### 5.6 Motor de recomendaciones
 
@@ -163,8 +194,9 @@ Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan,
 
 `DashboardController`, tres bloques:
 
+0. **Avisos** — el estado del plan (sección 5.18) y, si ayer quedó alguna comida sin reportar, una línea con el enlace para completarla (sección 5.24).
 1. **Hoy** — anillo de déficit (`--pct` = consumidas / (objetivo + actividad), acotado 0–100; un superávit se pinta en crema, no en lima, con la etiqueta "kcal por encima"), estado de las tres comidas, botón para abrir/crear el plan de hoy.
-2. **Tu tendencia** — promedio móvil de peso + % semanal, déficit promedio, índice de consistencia, gráfico Chart.js (si el CDN no carga, las cifras server-rendered siguen ahí).
+2. **Tu tendencia** — promedio móvil de peso + % semanal, déficit promedio, racha de días seguidos cerrados (sección 5.23), gráfico Chart.js (si el CDN no carga, las cifras server-rendered siguen ahí).
 3. **Tu seguimiento** — seis semanas con adherencia/comidas/peso medio/variación/déficit, e historial de recomendaciones con sus botones Confirmar/Rechazar.
 
 `/progreso` es un `Route::redirect` a `/dashboard` (pantalla ya fusionada, se conserva el enlace).
@@ -174,6 +206,7 @@ Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan,
 **Reconocimiento nativo del navegador, sin coste.** El único camino normal es la Web Speech API: quien reconoce la voz es el sistema operativo (Windows, Android, macOS e iOS lo traen), el audio no sale del dispositivo y no cuesta ninguna llamada al proveedor.
 
 - **iOS entra por el mismo camino.** Safari soporta `webkitSpeechRecognition` pero ignora `continuous = true`: corta la sesión sola en cada pausa. La solución nativa es reconocer **por tramos y reengancharlos** (`continuous = false` + arrancar otra sesión en `end` mientras el usuario no pulse "Listo"), acumulando el texto definitivo entre tramos. `TRAMOS_MUDOS_MAXIMOS` evita reenganchar para siempre con un micrófono callado.
+- **"Listo" no espera al evento `end`.** En iOS Safari, llamar a `stop()` no siempre lo dispara a tiempo —y si el clic cae en mitad de un reenganche entre tramos, puede no llegar nunca—, así que `dictado.js` inserta el texto (lo confirmado más lo que todavía estuviera a medio reconocer) en el mismo clic de "Listo", y solo después intenta parar la sesión en segundo plano. Un `end` tardío que llegue después ya no hace nada (guardián `cerrado`).
 - **El plan B —grabar y transcribir en el servidor— está apagado por defecto.** `POST /transcribir` (único endpoint JSON, `throttle:30,1`, `OpenAiTranscripcionProvider`) sigue implementado y probado, pero solo responde con `TRANSCRIPCION_FALLBACK_SERVIDOR=true`: cada dictado sería una llamada facturable y ocuparía un worker de PHP-FPM (sección 5.13). Apagado, el layout ni siquiera emite la meta `ruta-transcribir`, así que el JS no tiene a dónde mandar audio.
   - Endpoint propio (`audio/transcriptions`, multipart) y modelo propio (`OPENAI_MODEL_TRANSCRIPCION`), no el de texto. **La extensión del nombre de archivo no es cosmética**: es como la API elige el decodificador, y sin ella responde 400 — de ahí el mapa MIME→extensión del proveedor. El idioma se fija en `es` en vez de dejar que lo detecte: equivocarse sobre dos palabras devuelve una transcripción inservible.
   - Las muletillas que el modelo inventa sobre audio en silencio ("gracias por ver el video", artefacto de haberse entrenado con subtítulos) se filtran y se tratan como "no se escuchó nada": si no, acabarían escritas en el campo de ingredientes del usuario.
@@ -185,15 +218,15 @@ Si el navegador no puede reconocer voz y el plan B está apagado, el botón del 
 Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y no redirect**).
 
 - `GET /admin` — cifras y cola de activación con el código de cada pendiente a la vista, más los accesos a parámetros maestros y material de apoyo.
-- `GET /admin/usuarios` — búsqueda por nombre/correo/código, filtro por estado, pendientes primero; activar/suspender/promover/degradar/regenerar código/eliminar (con confirmación, cascade se lleva todo el historial).
+- `GET /admin/usuarios` — búsqueda por nombre/correo/código, filtro por estado, pendientes primero; activar/suspender/promover/degradar/dar o quitar Premium a mano/eliminar (con confirmación, cascade se lleva todo el historial). "Nuevo código" ya no está: con la cuenta naciendo activa (sección 5.1), regenerar código solo tiene sentido al devolver una cuenta a `pendiente` desde el cambio de estado, y ahí lo sigue haciendo `CuentaService::regenerarCodigo()` por su cuenta.
 - **Un administrador no puede degradarse, suspenderse ni borrarse a sí mismo** (`ActualizarUsuarioRequest::after()` + `abort_if`).
 - "Administración" es un ítem más de la barra lateral **solo para administradores**, y está en el menú del avatar; no entra en la barra inferior de móvil (esos tres destinos son el flujo diario del usuario).
 
 ### 5.11 Parámetros maestros (`/admin/parametros`)
 
-`ParametrosMaestrosService::CATALOGO` es la **única declaración** de qué parámetros existen, tipo, límites y explicación; sus valores de fábrica referencian las constantes públicas de los servicios que los consumen (no una copia). Nueve parámetros: cinco del motor de recomendaciones (sección 5.6) y cuatro de la sugerencia de actividad (sección 5.4). La tabla solo guarda lo que cambió; los valores se cachean juntos y para siempre, invalidados al guardar. Si la tabla no existe todavía (deploy antes de `migrate`), cae a los valores de fábrica sin tumbar la aplicación.
+`ParametrosMaestrosService::CATALOGO` es la **única declaración** de qué parámetros existen, tipo, límites y explicación; sus valores de fábrica referencian las constantes públicas de los servicios que los consumen (no una copia). Once parámetros: cinco del motor de recomendaciones (sección 5.6), cuatro de la sugerencia de actividad (sección 5.4) y dos de la cuota diaria de IA (sección 5.20). La tabla solo guarda lo que cambió; los valores se cachean juntos y para siempre, invalidados al guardar. Si la tabla no existe todavía (deploy antes de `migrate`), cae a los valores de fábrica sin tumbar la aplicación.
 
-**Qué NO entra, a propósito:** el reparto entre comidas (no es un umbral del administrador sino una preferencia del usuario que cambia por día — sección 5.14), el material de apoyo (es contenido y uno de sus valores es un archivo subido — sección 5.15), las fórmulas de la sección 7 (son la definición del producto), el modelo/timeout del proveedor de IA (configuración de despliegue, vive en `.env`).
+**Qué NO entra, a propósito:** el reparto entre comidas (no es un umbral de criterio sino una función del día que deriva `RepartoComidasService` — sección 5.14), el material de apoyo (es contenido y uno de sus valores es un archivo subido — sección 5.15), las fórmulas de la sección 7 (son la definición del producto), el modelo/timeout del proveedor de IA (configuración de despliegue, vive en `.env`).
 
 ### 5.12 Identidad visual, mobile-first y shell instalable
 
@@ -218,12 +251,18 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 
 ### 5.14 Reparto de calorías entre comidas
 
-`RepartoComidasService` resuelve, en este orden, cuál rige: **el del día** (`registros_diarios.reparto_comidas`) → **el habitual del usuario** (`users.reparto_comidas`) → **el de fábrica** (`MealPlanGeneratorService::DISTRIBUCION_COMIDAS`, 25/40/35). `null` en las dos columnas significa "el de fábrica", así que cambiar el valor de fábrica alcanza a quien nunca lo personalizó.
+**Ya no lo teclea el usuario: se deriva.** Había un panel "Reparto del día" con tres porcentajes editables y se retiró — repartir el día es una decisión nutricional, no una preferencia de interfaz, y pedirle a quien está aprendiendo a comer mejor que elija los porcentajes es pedirle justo lo que ha venido a que le resuelvan. `RepartoComidasService::paraElDia()` lo calcula a partir de dos cosas y nada más:
 
-- **Se ajusta desde el plan diario** (`POST /planes/{registroDiario}/reparto`, desplegable "Reparto del día"): tres porcentajes enteros que deben sumar 100, mínimo 5% por comida, con una casilla **"guardar como mi reparto habitual"** que además lo adopta en el perfil para los días nuevos.
+1. **Un reparto balanceado de partida** — `MealPlanGeneratorService::DISTRIBUCION_COMIDAS`, **30/40/30**. Ninguna comida queda testimonial y la cena no carga con el día, que es el hábito que se quiere corregir: quien desayuna poco llega a la noche con hambre y come de más cuando menos actividad le queda por delante.
+2. **La actividad física registrada ese día** — la comida posterior al entrenamiento recibe más parte del día. Cuánto más es proporcional a lo quemado sobre el objetivo (`calorias_ajustadas / calorias_objetivo`), con techo en `PUNTOS_MAXIMOS_ACTIVIDAD` (10 puntos) para que una sola sesión larga no desfigure el reparto, y suelo `PROPORCION_MINIMA` (15%) para el resto.
+
+- **Qué comida es "la posterior"**: la primera todavía abierta cuya `HORA_DE_REFERENCIA` (desayuno 8, almuerzo 13, cena 19) cae en o después de la hora de la actividad; si ya pasaron todas, la última que siga abierta. La hora sale del `created_at` de la `ActividadFisica` —se registran al terminar— y por eso no hizo falta una columna nueva. Si todas las comidas están cerradas no hay nada que desplazar y rige el balanceado.
+- **El día no crece, solo cambia de forma.** La suma sigue siendo 1.0; las calorías de la actividad entran en el déficit por donde siempre (sección 7).
+- **No se persiste en ninguna columna.** Es una función pura del día, así que guardarlo solo abriría la puerta a que una fila contradiga al cálculo. Las columnas `users.reparto_comidas` y `registros_diarios.reparto_comidas` se eliminaron con la ruta y el formulario.
 - **No recalcula nada ya generado.** Los macros de un `PlanComida` están persistidos; el reparto dimensiona los objetivos que se muestran y el presupuesto de lo que queda por generar. Cuando solo faltan dos comidas, lo disponible se reparte con los pesos del reparto vigente, no a partes iguales.
-- La validación vive en el servicio (`desdePorcentajes()` lanza `InvalidArgumentException`), no solo en `RepartoComidasRequest`: el reparto se consume fuera de HTTP. Un reparto persistido que no suma 1.0 (una fila tocada a mano) se ignora y se cae al siguiente escalón.
+- `explicacion()` devuelve qué comida recibió el desplazamiento y de cuánto fue, para poder contarlo en pantalla **en una línea** — nunca un párrafo de instrucciones (regla 8).
 - Las **claves** siguen saliendo de `DISTRIBUCION_COMIDAS` porque son nombres de columna (`ingredientes_*`) y de campo de formulario; lo único que varía es el porcentaje.
+- **Los carbohidratos post-entreno no son un reparto aparte.** La comida posterior recibe más de *todo*, y al proveedor se le dice cuál es para que **dentro** de ella prefiera los carbohidratos (sección 5.3). Un reparto distinto por macro haría que los macros de una comida no sumaran sus propias calorías.
 
 ### 5.15 Material de apoyo (`/admin/recursos`)
 
@@ -237,7 +276,7 @@ Rutas bajo `auth` + `cuenta.activa` + `admin` (`EnsureEsAdministrador`, **403 y 
 
 `PlanDiarioService`, dos acciones destructivas que el usuario pide explícitamente y que van detrás de una confirmación en línea (nunca `confirm()` de JavaScript):
 
-- **`resetear()`** (`POST /planes/{registroDiario}/resetear`, botón "Reiniciar este día" al final del plan): deja el día como recién creado — sin planes de comida, sin lo registrado, sin actividades, sin recomendaciones, sin textos de ingredientes, sin peso, sin las cifras del cierre y abierto. Conserva la fecha y el reparto del día.
+- **`resetear()`** (`POST /planes/{registroDiario}/resetear`, botón "Reiniciar este día" al final del plan): deja el día como recién creado — sin planes de comida, sin lo registrado, sin actividades, sin recomendaciones, sin textos de ingredientes, sin peso, sin las cifras del cierre y abierto. Conserva la fecha. El reparto vuelve por sí solo al balanceado, porque se deriva de la actividad del día y esa también se borra (sección 5.14). **Solo para el día de hoy**: un día pasado ya no puede volver a vivirse, así que vaciarlo solo borraría historial de la ventana de 7 días; la vista ni pinta el botón fuera de hoy y `PlanComidaController@resetear` lo rechaza igual si llega por la ruta directamente. Para deshacerse de un día viejo está `eliminar()`.
 - **`eliminar()`** (`DELETE /planes/{registroDiario}`, desde el listado y desde el propio plan): borra el `RegistroDiario`; las FK `cascade` se llevan el resto.
 
 Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada de la base de datos se lleva las filas, pero no los archivos del disco.
@@ -267,8 +306,8 @@ Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada d
 
 | Función | Punto de corte |
 |---|---|
-| Distribución de comidas con IA | `PremiumGatedMealDistributionProvider::distribuirDia()` |
-| Estimación de consumo real en el cierre | `PremiumGatedMealDistributionProvider::estimarConsumoReal()` |
+| Ajuste del plan con IA | `PremiumGatedMealDistributionProvider::distribuirDia()` |
+| Reporte de una comida contado por escrito | `PremiumGatedMealDistributionProvider::estimarConsumoReal()` |
 | Plan B del dictado (transcribir en el servidor) | `PremiumGatedTranscripcionProvider::transcribir()` |
 | Motor de recomendaciones | `DailyClosureService::generarRecomendaciones()` |
 | Historial: gráfico > 7 días y seguimiento > 1 semana | `DashboardController` |
@@ -276,11 +315,13 @@ Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada d
 - **El control vive en el borde del proveedor, no en los controladores.** Las interfaces de `app/Services/AI` son el único camino hacia el proveedor de IA, así que se envuelven en `AppServiceProvider` y un solo decorador cubre las dos funciones que las cruzan. Ningún camino nuevo puede saltárselo por olvidar un `if`. Los decoradores lanzan las excepciones de dominio que los controladores ya traducían (`MealDistributionUnavailableException::requierePremium()`, `TranscripcionNoDisponibleException::requierePremium()`), así que ningún controlador cambió y el usuario ve un mensaje que explica qué plan hace falta, nunca un error genérico ni un 500.
 - **Sin sesión no hay plan que comprobar** (consola, seeders): se deja pasar. Hoy nada de eso llama al proveedor.
 - **Dictar ingredientes es gratis para todos**, y por eso no aparece como exclusiva de Premium en la landing: lo resuelve el reconocedor del navegador, el audio no sale del dispositivo y no cuesta una llamada (sección 5.9). Lo gateado es solo el plan B de servidor, que se factura y está apagado por defecto. Es la única desviación deliberada respecto de la tabla del mockup de la landing, que lo listaba como Premium cuando ya no dependía de la IA.
-- **El corte de las recomendaciones va en la generación, no en la vista**: una recomendación creada y luego escondida seguiría moviendo `calorias_objetivo` el día que el usuario volviera a Premium y la confirmara sin haberla visto nunca. Cerrar el día **no** es Premium: en Gratis se cierra con todas sus cifras, por el camino de "sí, lo cumplí", que no gasta ninguna llamada.
+- **El corte de las recomendaciones va en la generación, no en la vista**: una recomendación creada y luego escondida seguiría moviendo `calorias_objetivo` el día que el usuario volviera a Premium y la confirmara sin haberla visto nunca. Cerrar el día **no** es Premium ni cuesta una llamada (sección 5.5): en Gratis se cierra con todas sus cifras, cerrando cada comida por el camino de "cumplí lo sugerido" o repitiendo una frecuente.
+- **Premium tampoco es ilimitado en llamadas**: las dos funciones de arriba tienen además una cuota diaria (sección 5.20). El plan decide qué funciones hay; la cuota, cuántas veces al día se usan.
 - **Precios en un solo sitio**: `config/planes.php` (mensual, anual, días de prueba y qué incluye cada plan). El descuento anual no se declara — `PlanService::precios()` lo deriva de los dos importes para que no pueda contradecirlos. Cuando entre el cobro, el importe cobrado tiene que salir de ese mismo archivo.
 - La interfaz lo dice en una línea y sin bloquear (`x-tudi.plan` en Inicio): días de prueba restantes, o que la prueba terminó y el historial sigue ahí. Un Premium pagante no ve nada.
 - **`UserFactory` nace `premium`** por el mismo motivo que nace `activo`: casi ningún test va del cobro. Para eso están `gratis()`, `enPrueba()` y `pruebaVencida()`.
-- **Pendiente para la siguiente sesión: la pasarela de pago (Wompi).** No hay checkout, ni webhooks, ni facturación, ni forma de pasar a `premium` salvo `PlanService::activarPremium()` desde consola. La landing anuncia el precio; el botón "Actualizar a Premium" del aviso de plan (`x-tudi.plan`) es a propósito un `<button type="button">` sin acción — se ve como el resto de la interfaz, pero no navega a ningún sitio, porque `tudeficitinteligente.online` va a usarse para pilotos de viabilidad y todavía no hay checkout que ofrecer. En cuanto lo haya, es el único botón que hay que enlazar.
+- **Control manual desde la consola** (sección 5.10): `Admin\UsuarioController::plan()` (`POST /admin/usuarios/{usuario}/plan`) alterna Premium/Gratis con `PlanService::activarPremium()`/`degradarAGratis()` — la manija provisional mientras no exista el cobro. Quitar Premium no toca `estado` ni borra nada.
+- **Pendiente para la siguiente sesión: la pasarela de pago (Wompi).** No hay checkout, ni webhooks, ni facturación, ni forma de pasar a `premium` salvo el botón manual de la consola. La landing anuncia el precio; el botón "Actualizar a Premium" del aviso de plan (`x-tudi.plan`) es a propósito un `<button type="button">` sin acción — se ve como el resto de la interfaz, pero no navega a ningún sitio, porque `tudeficitinteligente.online` va a usarse para pilotos de viabilidad y todavía no hay checkout que ofrecer. En cuanto lo haya, es el único botón que hay que enlazar.
 - **Días de prueba:** 3 por defecto (`TUDI_PRUEBA_DIAS`, `config/planes.php`), no 7. Se lee dinámicamente en toda la aplicación (notificaciones, landing, `DemoSeeder`) — cambiarlo es cambiar esa única línea.
 
 ### 5.19 Landing pública (`/`)
@@ -291,6 +332,50 @@ Las dos llaman antes a `ComidaRealService::borrarImagenesDelDia()`: la cascada d
 - **No usa `layouts.guest`**: aquel es la tarjeta centrada del login. Sí usa el mismo sistema visual (tokens y `.tudi-*`), así que pasar de la landing al registro no cambia de mundo. Mobile-first, con la barra de navegación acortando su CTA por debajo de `sm:` para no partir en dos líneas.
 - Los dos botones de precios llevan al **mismo** `register`: no hay ruta de alta distinta para Premium. "Probar X días gratis" es el refuerzo visual de lo que el registro ya hace solo (sección 5.18).
 
+
+### 5.20 Cuota diaria de llamadas a la IA
+
+`CuotaIaService` + `CuotaDiariaMealDistributionProvider`. **Premium es ilimitado en funciones, no en llamadas.** Cada "Calcular mi plan" y cada reporte contado por escrito es una llamada facturable que además ocupa un worker de PHP-FPM mientras dura (sección 5.13), y nada impedía abrir y cerrar la misma comida veinte veces para ver qué macros salían. El límite acota ese bucle sin quitarle a nadie la posibilidad de registrar su día — el mismo patrón que los planes de pago de las propias herramientas de IA.
+
+- **Dos conceptos, dos límites**, ambos parámetros maestros (sección 5.11) y por tanto ajustables sin desplegar: `ia_limite_distribuciones_dia` (12 de fábrica) e `ia_limite_reportes_dia` (15).
+- **Qué gasta cuota y qué no.** Solo lo que llama al proveedor: ajustar el plan y contar por escrito qué se comió. Cerrar una comida con "cumplí lo sugerido", repetir una comida frecuente (sección 5.22), cerrar el día, dictar por voz y todo lo demás son gratis. Esa es también la salida honesta para quien agota el día: se sigue registrando todo, solo que sin IA, y la pantalla lo dice así.
+- **El corte va en un decorador, no en un `if`** (regla 14): `PremiumGatedMealDistributionProvider` por fuera, `CuotaDiariaMealDistributionProvider` por dentro. A quien está en Gratis se le dice qué plan necesita, no cuánta cuota le queda de algo que no tiene. Sin sesión (consola, seeders) se deja pasar, igual que el control de plan.
+- **Se descuenta al pedir, no al acertar.** Un intento que falla en el proveedor ya ha costado tokens, y cobrar solo los aciertos dejaría un bucle de fallos llamando gratis para siempre. Por lo mismo, **reabrir una comida no devuelve cuota**.
+- **El contador vive en la caché**, con clave por usuario, concepto y fecha local, y expira solo a medianoche. No hace falta tabla: no es un dato del dominio, no se consulta históricamente y perderlo solo regala el resto del día. El plan diario enseña cuántas quedan, para que el límite no sorprenda a nadie a media tarde.
+- El plan B del dictado (`/transcribir`) no entra aquí: está apagado por defecto y ya lleva `throttle:30,1` (sección 5.9).
+
+### 5.21 Saldo del día, macro a macro
+
+`MealDistributionService::saldoDelDia()` devuelve objetivo, consumido y **saldo** de calorías y de los tres macros, más qué comidas quedan pendientes. Lo calcula PHP desde las `ComidaReal` del día (regla 7) y no persiste nada.
+
+Es lo que hace visible el cierre por comida: el panel "Objetivo del día" pasa de enseñar solo la cifra objetivo a enseñar **lo que queda** ("te quedan 1.180 kcal para almuerzo y cena", "quedan 72,0 g de proteína"), con las barras midiendo lo comido de verdad contra el objetivo. Un saldo negativo se pinta en ámbar con "te pasaste por", nunca en lima — la lima es progreso y nada más (regla 8).
+
+El mismo saldo es el que reparte "Calcular mi plan" entre las comidas que faltan (sección 5.3). Por eso `ComidaRealService` **ya no redistribuye** el presupuesto de las comidas pendientes al registrar una: aquello reescribía `calorias_estimadas` en silencio y dejaba planes incoherentes con sus propios ingredientes. Ahora un `PlanComida` persistido significa exactamente lo que dice, y quien reparte de nuevo es una acción explícita del usuario.
+
+### 5.22 Comidas frecuentes ("lo que sueles comer")
+
+`ComidasFrecuentesService`. Casi nadie desayuna algo distinto cada día: sin esto, quien repite su desayuno seis días de siete lo vuelve a escribir (o a dictar) seis veces, y cada una cuesta una llamada para obtener los mismos macros que ya se calcularon el lunes.
+
+**Es un atajo de escritura, no un botón que reporta por su cuenta** (sección 5.5): al pulsar un chip se copia su texto en el campo "Cuéntanos qué comiste de verdad…" y nada más — no envía el formulario ni llama a nadie. Si ese texto llega sin tocar, `ReporteComidaService` reutiliza los macros de aquel reporte (`coincideCon()`); si se edita, lo que manda es el texto nuevo y sí pasa por la IA. Antes era un botón `type="submit"` que reportaba directo: se cambió porque un envío inmediato no dejaba corregir "lo mismo pero sin arroz" sin gastar una llamada aparte.
+
+- Mira los últimos `DIAS_HISTORIAL` (30) días de ese tipo de comida, agrupa por lo que el usuario ve —la nota del reporte sin el detalle que el modelo añade tras un guion, o la descripción del plan si cumplió lo sugerido—, exige `REPETICIONES_MINIMAS` (2) y ofrece como mucho `MAXIMO_SUGERENCIAS` (3), de la más repetida a la menos. La plantilla es el reporte más reciente del grupo.
+- **La normalización se hace en PHP, no en SQL** (mismo criterio que el promedio móvil, sección 5.7): son unas decenas de filas por usuario y la comparación con acentos no es portable entre MySQL y SQLite.
+- **No hay tabla de plantillas**: la plantilla ES el reporte anterior. `deUsuario()` comprueba la propiedad ahí mismo, porque es el único camino por el que una `ComidaReal` se copia de un día a otro.
+
+### 5.23 Racha de días cerrados
+
+`TrendAnalyticsService::rachaDiasCerrados()`: días seguidos cerrados contando hacia atrás desde hoy, con tope en `DIAS_MAXIMOS_RACHA` (365). **Hoy sin cerrar no rompe la racha** — el día sigue en curso y aún puede cerrarse; se corta en el primer día anterior sin `RegistroDiario` o con el registro abierto.
+
+Es la lectura amable del mismo dato que ya mide `indice_consistencia_pct`: el índice dice cuánto adherió en la ventana, la racha dice cuánto lleva sin fallar. Se enseña en la tarjeta "Racha" de Inicio, encima de los siete puntos de la semana, que se conservan.
+
+### 5.24 Aviso de comidas sin reportar
+
+`DashboardController::comidasSinReportarAyer()`: si el plan de **ayer** existe, tiene alguna comida reportada y alguna sin reportar, Inicio muestra una línea en ámbar con las que faltan y un enlace al día para completarlo (reabriéndolo si hiciera falta).
+
+- Un día sin **nada** reportado no se avisa: no es un descuido, es un día que no se usó, y recordárselo sería ruido.
+- Solo el día anterior: recordar lo de hace tres días ya no es fiable.
+- **Aviso en pantalla y no correo**, a propósito: no hace falta cron nuevo, no gasta cola y no manda correo diario a nadie que no lo haya pedido. El valor es el mismo — un hueco sin reportar entra luego en el promedio móvil como calorías que nunca se comieron, y `diagnosticoRecomendaciones` lo cuenta como día sin datos.
+
 ## 6. Rutas y código sin usar, conservados a propósito
 
 No son deuda técnica olvidada — cada uno se conserva por una razón concreta y está cubierto por tests:
@@ -298,7 +383,7 @@ No son deuda técnica olvidada — cada uno se conserva por una razón concreta 
 - **Ingredientes estructurados** (`IngredienteDisponibleController`, rutas `/ingredientes`): el camino normal es el texto libre del plan diario (sección 5.3); estas rutas siguen siendo la entrada de `MealPlanGeneratorService`.
 - **`MealPlanGeneratorService` + `POST /planes/{registroDiario}/generar`**: heurística de reparto por macro (proteína → grasa → carbohidratos) sobre ingredientes estructurados. Sustituida por la distribución con IA (sección 5.3) como camino del usuario, pero sigue funcionando y probada. Su constante `DISTRIBUCION_COMIDAS` no es código muerto: es la declaración de qué comidas hay y del reparto de fábrica (sección 5.14).
 - **`NutritionAiProviderInterface` + `RuleBasedNutritionProvider`**: desacopla "quién decide" la selección de ingredientes sobre inventario estructurado (usada por `MealPlanGeneratorService`) de una futura IA generativa para ese mismo problema — distinto del problema que resuelve `MealDistributionProviderInterface` (interpretar lenguaje natural).
-- **`ComidaRealController@create`/`@store`** (`/plan/{planComida}/comida-real`, "Registrar con detalle"): el botón por comida desapareció del plan diario (sección 5.3); sigue disponible para corregir macros exactos a mano. `@destroy` del mismo controlador **sí** está enlazado — es el "Cambiar mi respuesta" del cierre (sección 5.5).
+- **`ComidaRealController`** (`/plan/{planComida}/comida-real`, "Registrar con detalle"): las tres acciones siguen sin estar enlazadas desde la interfaz. Lo que se comió se reporta ahora desde la propia tarjeta de cada comida (sección 5.5), que además cubre las comidas sin plan previo; este controlador se conserva para corregir macros exactos a mano y está cubierto por tests.
 - **`GeminiMealDistributionProvider` + `GeminiTranscripcionProvider`**: proveedores de IA anteriores a OpenAI, con sus tests enteros. No están fuera del alcance de `AppServiceProvider` como el resto de esta sección: `AI_PROVEEDOR_DISTRIBUCION`/`AI_PROVEEDOR_TRANSCRIPCION` (`.env`, valores `openai`|`gemini`, por defecto `openai`) eligen entre los dos en tiempo de arranque —sin desplegar código, solo `config:cache`—, pensado para comparar los dos proveedores durante el piloto. Un valor no reconocido cae a OpenAI en vez de fallar. **`ClaudeMealDistributionProvider`** sigue en el repo, sin bindear ni cubierto por el interruptor (no tiene proveedor de transcripción equivalente), por si hiciera falta volver atrás.
 - **Activación por código** (`ActivacionController`, `/activacion`, estado `pendiente`, `EnsureCuentaActiva`): ya no es el camino del alta (sección 5.1), pero sigue siendo la herramienta con la que un administrador devuelve una cuenta a validación manual desde `regenerarCodigo()`.
 
@@ -403,3 +488,4 @@ Cubierto por `tests/Unit/NutritionCalculatorServiceTest.php`.
 14. **Toda llamada nueva a un proveedor de IA entra por una interfaz de `app/Services/AI` ya envuelta en su decorador de plan** (sección 5.18). No añadas la comprobación de plan en un controlador: si una función de pago necesita un camino nuevo, el corte va en el borde del proveedor, que es el único sitio por el que no se puede pasar de largo.
 15. **Ningún plan puede dejar a nadie fuera de la aplicación** (sección 5.18). El plan quita funciones; quien decide si se entra es `estado` y su middleware. Y ningún cambio de plan borra, oculta ni recalcula datos históricos.
 16. **Un precio no se escribe en una vista** (sección 5.18): vive en `config/planes.php` y se lee por `PlanService::precios()`. Lo que se pueda derivar de otro importe se deriva, no se declara.
+17. **La cuota diaria de IA se descuenta en el borde del proveedor, y solo lo que de verdad llama** (sección 5.20). Si añades un camino que use el proveedor, la cuota ya lo cubre; si añades un atajo que NO llama (repetir algo ya calculado, copiar un plan), no lo cobres — la salida honesta para quien agota el día es que siga pudiendo registrarlo todo sin IA.

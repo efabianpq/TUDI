@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\AI\CuotaDiariaMealDistributionProvider;
 use App\Services\AI\GeminiMealDistributionProvider;
 use App\Services\AI\GeminiTranscripcionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
@@ -12,6 +13,7 @@ use App\Services\AI\PremiumGatedMealDistributionProvider;
 use App\Services\AI\PremiumGatedTranscripcionProvider;
 use App\Services\AI\RuleBasedNutritionProvider;
 use App\Services\AI\TranscripcionAudioProviderInterface;
+use App\Services\CuotaIaService;
 use Illuminate\Contracts\Auth\Factory as Auth;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Carbon;
@@ -39,11 +41,17 @@ class AppServiceProvider extends ServiceProvider
         // plan (CLAUDE.md sección 5.18): la interfaz es el único camino hacia el
         // proveedor, así que envolverla cubre de una vez la distribución de
         // comidas y la estimación de consumo real, sin un solo `if` en los
-        // controladores.
+        // controladores. Dentro va la cuota diaria de llamadas (sección 5.20),
+        // por dentro del control de plan: a quien está en Gratis se le dice qué
+        // plan necesita, no cuántas llamadas le quedan de algo que no tiene.
         $this->app->bind(
             MealDistributionProviderInterface::class,
             fn ($app) => new PremiumGatedMealDistributionProvider(
-                $this->motorDeDistribucion($app),
+                new CuotaDiariaMealDistributionProvider(
+                    $this->motorDeDistribucion($app),
+                    $app->make(CuotaIaService::class),
+                    $app->make(Auth::class),
+                ),
                 $app->make(Auth::class),
             ),
         );

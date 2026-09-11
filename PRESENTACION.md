@@ -53,30 +53,41 @@ Cada paso indica con **qué cuenta** entrar. Contraseña de todas: `demo1234`.
 
 - Abre **Planes diarios → el plan de hoy**. Está a medias a propósito.
 - Arriba, el panel **Objetivo del día** con proteína, grasas y carbohidratos.
-- Abre **Reparto del día**: cambia a 20 / 45 / 35 y aplica. Señala que los
-  objetivos por comida se recalculan y que **los planes ya hechos no cambian**.
+- Señala la línea del reparto (30% desayuno · 40% almuerzo · 30% cena): *"esto
+  no lo elige el usuario, lo calcula TUDI"*.
 - Abre una comida sin resolver, escribe (o **dicta con el micrófono**) unos
-  ingredientes y pulsa **Generar distribución**.
+  ingredientes y pulsa **Ajustar mi plan**.
 
 > **Frase:** "Una sola consulta para las tres comidas. Y fíjate: el modelo
 > propone los alimentos, pero las calorías las suma el sistema. Ninguna cifra
 > que entre al balance la inventa una IA."
 
-- Baja a **Actividad física**: la sugerencia del día y lo que ya lleva hecho.
+- Baja a **Actividad física**, registra una caminata y vuelve arriba: el reparto
+  se ha desplazado hacia la comida posterior al entrenamiento.
 
-### Paso 3 · "Cerrar el día" — 2 min
+> **Frase:** "El plan responde a lo que hace, no solo a lo que come."
+
+### Paso 3 · "Comida a comida, y cerrar el día" — 3 min
 **Misma cuenta.**
 
-- Baja al **Cierre del día**. Muestra la tarjeta **"Lo que llevas comido"**:
-  los cuatro macros, real contra objetivo.
-- En **"¿Cumpliste con lo sugerido?"**, activa el interruptor de una comida y en
-  otra escribe *"al final me comí un sándwich y una gaseosa"*.
-- Pulsa **Cerrar mi día**.
-- Enseña **"Lo que respondiste"** y el botón **Cambiar mi respuesta** (hay que
-  reabrir el día primero).
+- En la tarjeta del desayuno, debajo de lo que se le planificó, pulsa **Cerrar
+  desayuno**: se abren ahí mismo los campos y el botón pasa a **Confirmar
+  cierre**. Márcalo como cumplido y confirma.
+- Sube al panel de objetivo: **el saldo del día ya lo descuenta**, macro a macro,
+  y dice para qué comidas queda.
+- En el almuerzo, escribe *"al final me comí un sándwich y una gaseosa"* y
+  confirma el cierre.
+- Vuelve a **Ajustar mi plan**: ahora reparte solo lo que queda, y las comidas
+  cerradas no se tocan.
 
-> **Frase:** "Aquí está la diferencia. No registra lo que planeaste: registra lo
-> que pasó. Y si te equivocas al responder, se cambia."
+> **Frase:** "Esto es lo que cambia todo. No espera al final del día para
+> enterarse de lo que comiste: lo sabe en el momento, y el resto del día se
+> adapta."
+
+- Enseña **Reabrir desayuno**, en la misma tarjeta: la respuesta se puede cambiar.
+- Baja al **Cierre del día**, muestra **"Lo que llevas comido"** y pulsa
+  **Cerrar mi día**. Señala que si falta alguna comida por reportar hay que
+  confirmarlo, y que **cerrar el día no llama a la IA**.
 
 ### Paso 4 · "El sistema me corrige" — 2 min
 **Cuenta:** `baja-lento@demo.tudeficitinteligente.online`

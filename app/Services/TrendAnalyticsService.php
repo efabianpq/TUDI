@@ -51,6 +51,12 @@ class TrendAnalyticsService
     public const DIAS_VENTANA = 7;
 
     /**
+     * Tope de la racha de días cerrados. Un año seguido ya se cuenta igual de
+     * bien que "365+", y acota la consulta que la calcula.
+     */
+    public const DIAS_MAXIMOS_RACHA = 365;
+
+    /**
      * Variación semanal de peso, en %, por debajo de la cual la tendencia se
      * considera "estable" en vez de pérdida o ganancia: ~0.08 kg para 80 kg,
      * dentro del ruido de una báscula doméstica.
@@ -152,6 +158,48 @@ class TrendAnalyticsService
             'fecha' => $corte->toDateString(),
             ...$atributos,
         ]);
+    }
+
+    /**
+     * Días seguidos cerrados que lleva el usuario (CLAUDE.md sección 5.23).
+     *
+     * Se cuenta hacia atrás desde hoy, y **hoy sin cerrar no rompe la racha**:
+     * el día todavía está en curso y aún puede cerrarse. La racha se corta en
+     * el primer día anterior a hoy sin RegistroDiario o con el registro sin
+     * cerrar.
+     *
+     * Es la lectura amable del mismo dato que ya mide `indice_consistencia_pct`
+     * (días cerrados de la ventana): el índice dice cuánto adherió, la racha
+     * dice cuánto lleva sin fallar, que es lo que engancha.
+     */
+    public function rachaDiasCerrados(User $usuario, ?Carbon $fechaCorte = null): int
+    {
+        $hoy = ($fechaCorte ?? now())->copy()->startOfDay();
+
+        // Se mira una ventana acotada: una racha de un año se dibujaría igual y
+        // no hace falta traerse el historial entero para contarla.
+        $cerrados = RegistroDiario::where('usuario_id', $usuario->id)
+            ->where('cerrado', true)
+            ->whereDate('fecha', '<=', $hoy->toDateString())
+            ->whereDate('fecha', '>=', $hoy->copy()->subDays(self::DIAS_MAXIMOS_RACHA)->toDateString())
+            ->pluck('fecha')
+            ->map(fn ($fecha): string => $fecha instanceof Carbon ? $fecha->toDateString() : (string) $fecha)
+            ->flip();
+
+        $racha = 0;
+        $dia = $hoy->copy();
+
+        // Hoy es el único día que puede faltar sin romper nada: sigue abierto.
+        if (! $cerrados->has($dia->toDateString())) {
+            $dia->subDay();
+        }
+
+        while ($cerrados->has($dia->toDateString()) && $racha < self::DIAS_MAXIMOS_RACHA) {
+            $racha++;
+            $dia->subDay();
+        }
+
+        return $racha;
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\MealDistributionUnavailableException;
+use App\Services\AI\CuotaDiariaMealDistributionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
 use App\Services\AI\OpenAiMealDistributionProvider;
 use App\Services\AI\PremiumGatedMealDistributionProvider;
@@ -111,7 +112,7 @@ function contextoDeEjemploOpenAi(array $fijas = [], array $reservadas = []): arr
     ];
 }
 
-it('resuelve la interfaz al proveedor de OpenAI, envuelto en el control de plan', function () {
+it('resuelve la interfaz al proveedor de OpenAI, envuelto en el control de plan y la cuota diaria', function () {
     $resuelto = app(MealDistributionProviderInterface::class);
 
     // El gate de plan es lo que garantiza que ninguna llamada al proveedor se
@@ -119,10 +120,18 @@ it('resuelve la interfaz al proveedor de OpenAI, envuelto en el control de plan'
     // (CLAUDE.md sección 5.18)...
     expect($resuelto)->toBeInstanceOf(PremiumGatedMealDistributionProvider::class);
 
-    // ...y dentro de él tiene que estar OpenAI, no el proveedor anterior: es la
-    // única línea que decide qué motor de IA usa toda la aplicación.
-    $envuelto = (new ReflectionProperty(PremiumGatedMealDistributionProvider::class, 'siguiente'))
+    // ...y justo debajo, la cuota diaria (sección 5.20). El orden importa: a
+    // quien está en Gratis se le dice qué plan necesita, no cuánta cuota le
+    // queda de una función que no tiene.
+    $conCuota = (new ReflectionProperty(PremiumGatedMealDistributionProvider::class, 'siguiente'))
         ->getValue($resuelto);
+
+    expect($conCuota)->toBeInstanceOf(CuotaDiariaMealDistributionProvider::class);
+
+    // Y dentro de los dos, OpenAI: es la única línea que decide qué motor de IA
+    // usa toda la aplicación.
+    $envuelto = (new ReflectionProperty(CuotaDiariaMealDistributionProvider::class, 'siguiente'))
+        ->getValue($conCuota);
 
     expect($envuelto)->toBeInstanceOf(OpenAiMealDistributionProvider::class);
 });
@@ -441,4 +450,35 @@ it('rechaza pedir una distribución sin comidas', function () {
         ->toThrow(MealDistributionUnavailableException::class, 'nada nuevo que distribuir');
 
     Http::assertNothingSent();
+});
+
+it('le pide priorizar carbohidratos en la comida posterior al entrenamiento', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(comidasCuadradasDeOpenAi()))]);
+
+    $contexto = contextoDeEjemploOpenAi();
+    $contexto['comida_post_actividad'] = 'almuerzo';
+
+    (new OpenAiMealDistributionProvider)->distribuirDia(comidasAGenerarOpenAi(), $contexto);
+
+    Http::assertSent(function ($peticion) {
+        $prompt = collect($peticion->data()['messages'])->pluck('content')->implode("\n");
+
+        return str_contains($prompt, 'ENTRENAMIENTO')
+            && str_contains($prompt, 'la comida')
+            && str_contains($prompt, 'posterior es el almuerzo')
+            // El presupuesto ya viene ampliado por PHP: el modelo no lo cambia.
+            && str_contains($prompt, 'que ya viene ampliado y no debes cambiar');
+    });
+});
+
+it('no menciona ningún entrenamiento cuando no se registró actividad', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(comidasCuadradasDeOpenAi()))]);
+
+    (new OpenAiMealDistributionProvider)->distribuirDia(comidasAGenerarOpenAi(), contextoDeEjemploOpenAi());
+
+    Http::assertSent(function ($peticion) {
+        $prompt = collect($peticion->data()['messages'])->pluck('content')->implode("\n");
+
+        return ! str_contains($prompt, 'ENTRENAMIENTO');
+    });
 });

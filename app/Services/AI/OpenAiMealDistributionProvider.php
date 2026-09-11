@@ -662,6 +662,15 @@ class OpenAiMealDistributionProvider implements MealDistributionProviderInterfac
             }
         }
 
+        if (($contextoDia['comida_post_actividad'] ?? null) !== null) {
+            $lineas[] = '';
+            $lineas[] = 'ENTRENAMIENTO: la persona ya registró actividad física hoy, y la comida';
+            $lineas[] = 'posterior es el '.$contextoDia['comida_post_actividad'].'. Dentro del presupuesto de';
+            $lineas[] = 'ESA comida —que ya viene ampliado y no debes cambiar—, prefiere los alimentos ricos';
+            $lineas[] = 'en carbohidratos de los que dice tener, que es lo que mejor repone después de';
+            $lineas[] = 'entrenar. No inventes alimentos que no haya mencionado para conseguirlo.';
+        }
+
         if ($contextoDia['comidas_reservadas'] !== []) {
             $lineas[] = '';
             $lineas[] = 'COMIDAS QUE LA PERSONA TODAVÍA NO HA ESCRITO. NO las resuelvas: su presupuesto';

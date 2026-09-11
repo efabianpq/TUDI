@@ -25,15 +25,22 @@ use Illuminate\Support\Facades\DB;
 class MealPlanGeneratorService
 {
     /**
-     * Share of the daily calorie/macro targets assigned to each meal.
-     * Single place where the split is defined — must always sum to 1.0.
+     * Qué comidas tiene un día y qué parte del objetivo le toca de partida a
+     * cada una. Única declaración de las dos cosas — la suma es siempre 1.0.
+     *
+     * 30/40/30 es un reparto **balanceado**: ninguna comida queda testimonial y
+     * la cena no carga con el día. Es el punto de partida del que arranca
+     * RepartoComidasService (sección 5.14), que lo desplaza hacia la comida
+     * posterior al entrenamiento cuando hay actividad física registrada. Las
+     * claves son además nombres de columna (`ingredientes_*`) y de campo de
+     * formulario, así que este array sigue siendo el que las declara.
      *
      * @var array<string, float>
      */
     public const DISTRIBUCION_COMIDAS = [
-        'desayuno' => 0.25,
+        'desayuno' => 0.30,
         'almuerzo' => 0.40,
-        'cena' => 0.35,
+        'cena' => 0.30,
     ];
 
     public function __construct(

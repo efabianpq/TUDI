@@ -4,23 +4,40 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DayAlreadyClosedException;
 use App\Exceptions\InvalidNutritionParameterException;
-use App\Exceptions\MealDistributionUnavailableException;
 use App\Exceptions\NegativeCarbohydrateException;
 use App\Http\Requests\CierreDiarioRequest;
 use App\Models\RegistroDiario;
-use App\Services\CierreFeedbackService;
 use App\Services\DailyClosureService;
+use App\Services\MealPlanGeneratorService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 
 /**
- * Cierre de un plan diario (CLAUDE.md secciones 4.5 y 4.16).
+ * Cierre de un plan diario (CLAUDE.md sección 5.5).
  *
- * No tiene pantalla propia: el cierre es la tercera sección del detalle del
- * plan diario. Antes de congelar el día se registra el feedback de cumplimiento
- * de cada comida (CierreFeedbackService), de modo que las cifras del cierre
- * reflejen lo que realmente se comió y no solo lo planificado.
+ * No tiene pantalla propia: el cierre es la última sección del detalle del plan
+ * diario.
+ *
+ * ── Cerrar el día ya no llama a la IA ──────────────────────────────────────
+ *
+ * Antes, cerrar el día era también el momento de contar qué se había comido, y
+ * eso significaba una llamada al proveedor dentro de la petición del cierre:
+ * costaba dinero, tardaba, y un proveedor caído dejaba el día sin cerrar. Desde
+ * el cierre por comida (ReporteComidaController) lo que se comió ya está
+ * reportado, así que aquí solo se consolida: sumar, calcular el déficit con
+ * NutritionCalculatorService y congelar. Cerrar el día es gratis, instantáneo y
+ * no puede fallar por un servicio externo.
+ *
+ * ── Los controles de validación ────────────────────────────────────────────
+ *
+ * Un día cerrado sin reportar nada no es un día sin comer: es un día sin
+ * contar, y su cero entra luego en el promedio móvil de 7 días como si fuera un
+ * dato bueno. Por eso:
+ *
+ *  - **Sin ninguna comida reportada** no se cierra, y se dice qué falta.
+ *  - **Con alguna comida sin reportar** se cierra, pero solo si el usuario lo
+ *    confirma explícitamente; la pantalla le dice cuáles son.
  */
 class CierreDiarioController extends Controller
 {
@@ -38,13 +55,10 @@ class CierreDiarioController extends Controller
 
     public function __construct(
         private readonly DailyClosureService $cierre,
-        private readonly CierreFeedbackService $feedback,
     ) {}
 
     /**
-     * "Cerrar mi día": consolida el feedback de las comidas y congela el día
-     * con sus cifras. Todo fallo de dominio vuelve como redirect con mensaje,
-     * nunca como un 500.
+     * "Cerrar mi día": consolida lo reportado y congela las cifras del día.
      */
     public function cerrar(CierreDiarioRequest $request, RegistroDiario $registroDiario): RedirectResponse
     {
@@ -62,18 +76,24 @@ class CierreDiarioController extends Controller
                 ->with('error', DayAlreadyClosedException::alCerrar($registroDiario->id)->getMessage());
         }
 
-        // El feedback se consolida antes de cerrar: un día ya cerrado no admite
-        // ComidaReal nuevas (sección 4.5). Si el proveedor de IA no puede
-        // interpretar lo que se comió, el día no se cierra y el usuario puede
-        // corregir el texto y reintentar.
-        try {
-            $this->feedback->registrar($registroDiario, (array) $request->validated('feedback', []));
-        } catch (MealDistributionUnavailableException $e) {
-            return Redirect::back(fallback: $volverAlPlan)->with('error', $e->getMessage());
+        $sinReportar = $this->cierre->comidasSinReportar($registroDiario);
+
+        if (count($sinReportar) === count(MealPlanGeneratorService::DISTRIBUCION_COMIDAS)) {
+            return Redirect::back(fallback: $volverAlPlan)->with('error', __(
+                'Todavía no has reportado ninguna comida. Cierra al menos una antes de cerrar el día: '.
+                'si no, el día quedaría congelado con cero calorías consumidas.',
+            ));
+        }
+
+        if ($sinReportar !== [] && ! $request->boolean('confirmar_sin_reportar')) {
+            return Redirect::back(fallback: $volverAlPlan)->with('error', __(
+                'Te faltan por reportar: :comidas. Repórtalas, o marca la casilla para cerrar el día igualmente.',
+                ['comidas' => implode(', ', $sinReportar)],
+            ));
         }
 
         try {
-            $this->cierre->cerrar($registroDiario->refresh());
+            $this->cierre->cerrar($registroDiario);
         } catch (DayAlreadyClosedException $e) {
             return Redirect::back(fallback: $volverAlPlan)->with('error', $e->getMessage());
         } catch (NegativeCarbohydrateException|InvalidNutritionParameterException $e) {

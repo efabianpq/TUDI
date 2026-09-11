@@ -14,9 +14,10 @@ use InvalidArgumentException;
  *
  * ── Qué entra en el catálogo y qué no ──────────────────────────────────────
  *
- * Entran los umbrales del motor de recomendaciones y los de la sugerencia de
- * actividad: son cifras de criterio, no de arquitectura, y moverlas no
- * invalida ningún dato ya persistido.
+ * Entran los umbrales del motor de recomendaciones, los de la sugerencia de
+ * actividad y los límites diarios de llamadas a la IA (sección 5.20): son
+ * cifras de criterio, no de arquitectura, y moverlas no invalida ningún dato ya
+ * persistido.
  *
  * NO entran, a propósito:
  *
@@ -133,6 +134,26 @@ class ParametrosMaestrosService
             'min' => 200.0,
             'max' => 1200.0,
             'unidad' => 'kcal',
+        ],
+        'ia_limite_distribuciones_dia' => [
+            'grupo' => 'Límites de IA',
+            'etiqueta' => 'Ajustes de plan al día',
+            'ayuda' => 'Cuántas veces al día puede cada usuario pulsar "Ajustar mi plan". Cada pulsación es una llamada facturable.',
+            'tipo' => self::TIPO_ENTERO,
+            'defecto' => CuotaIaService::LIMITE_DISTRIBUCIONES_DIA,
+            'min' => 1,
+            'max' => 100,
+            'unidad' => 'al día',
+        ],
+        'ia_limite_reportes_dia' => [
+            'grupo' => 'Límites de IA',
+            'etiqueta' => 'Reportes con IA al día',
+            'ayuda' => 'Cuántas comidas al día puede cerrar cada usuario contando por escrito qué comió. Cerrar con "cumplí lo sugerido" no gasta cuota.',
+            'tipo' => self::TIPO_ENTERO,
+            'defecto' => CuotaIaService::LIMITE_REPORTES_DIA,
+            'min' => 1,
+            'max' => 100,
+            'unidad' => 'al día',
         ],
         'actividad_duracion_maxima_min' => [
             'grupo' => 'Sugerencia de actividad',

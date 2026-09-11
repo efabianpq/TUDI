@@ -6,13 +6,14 @@ use App\Models\PlanComida;
 use App\Models\RecomendacionSistema;
 use App\Models\RegistroDiario;
 use App\Models\User;
+use App\Services\MealPlanGeneratorService;
 use App\Services\NutritionCalculatorService;
 use App\Services\RepartoComidasService;
 
 /**
- * Las acciones del plan diario que no son "generar y cerrar" (CLAUDE.md
- * secciones 5.5, 5.14 y 5.16): cambiar el reparto entre comidas, cambiar una
- * respuesta ya dada en el cierre, reiniciar el día y eliminarlo.
+ * Las acciones del plan diario que no son "ajustar y cerrar" (CLAUDE.md
+ * secciones 5.5, 5.14 y 5.16): el reparto automático entre comidas, reabrir una
+ * comida ya reportada, reiniciar el día y eliminarlo.
  */
 function usuarioDeAcciones(array $overrides = []): User
 {
@@ -49,73 +50,55 @@ function comidaPlanificada(RegistroDiario $dia, string $tipo = 'desayuno'): Plan
     ]);
 }
 
-// ── Reparto por día (sección 5.14) ─────────────────────────────────────────
+// / ── Reparto automático del día (sección 5.14) ──────────────────────────────
 
-test('el reparto del día se guarda y redimensiona los objetivos por comida', function () {
+test('el plan diario enseña el reparto que se calculó, no un formulario para teclearlo', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);
-
-    $this->actingAs($usuario)
-        ->post(route('planes.reparto', $dia), [
-            'reparto' => ['desayuno' => 20, 'almuerzo' => 45, 'cena' => 35],
-        ])
-        ->assertRedirect(route('planes.show', $dia))
-        ->assertSessionHas('status', 'reparto-guardado');
-
-    expect($dia->fresh()->reparto_comidas)
-        ->toBe(['desayuno' => 0.2, 'almuerzo' => 0.45, 'cena' => 0.35])
-        // No se ha adoptado como habitual: no se pidió.
-        ->and($usuario->fresh()->reparto_comidas)->toBeNull();
 
     $this->actingAs($usuario)->get(route('planes.show', $dia))
         ->assertOk()
-        ->assertSee('20% · 45% · 35%');
+        ->assertSee('30% desayuno · 40% almuerzo · 30% cena')
+        // El panel de porcentajes editables se retiró: repartir el día es una
+        // decisión nutricional, no una preferencia de interfaz.
+        ->assertDontSee('Reparto del día')
+        ->assertDontSee('Aplicar reparto')
+        ->assertDontSee('Guardar como mi reparto habitual');
 });
 
-test('el reparto se puede adoptar como habitual del usuario', function () {
+test('la ruta del reparto manual ya no existe', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);
 
-    $this->actingAs($usuario)->post(route('planes.reparto', $dia), [
-        'reparto' => ['desayuno' => 30, 'almuerzo' => 30, 'cena' => 40],
-        'como_habitual' => '1',
-    ])->assertSessionHas('status', 'reparto-guardado');
-
-    expect($usuario->fresh()->reparto_comidas)
-        ->toBe(['desayuno' => 0.3, 'almuerzo' => 0.3, 'cena' => 0.4]);
-
-    // Y un día nuevo, sin reparto propio, hereda el habitual.
-    $otroDia = diaDeAcciones($usuario, ['fecha' => now()->addDay()->toDateString()]);
-
-    expect(app(RepartoComidasService::class)->paraElDia($otroDia)['cena'])->toBe(0.4);
+    $this->actingAs($usuario)->post("/planes/{$dia->id}/reparto", [
+        'reparto' => ['desayuno' => 20, 'almuerzo' => 45, 'cena' => 35],
+    ])->assertNotFound();
 });
 
-test('un reparto que no suma 100 se rechaza con el error junto al campo', function () {
+test('registrar actividad desplaza el reparto y el plan diario lo explica', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);
 
-    $this->actingAs($usuario)
-        ->post(route('planes.reparto', $dia), [
-            'reparto' => ['desayuno' => 25, 'almuerzo' => 40, 'cena' => 40],
-        ])
-        ->assertSessionHasErrors('reparto');
+    $this->actingAs($usuario)->post(route('actividades.store', $dia), [
+        'tipo_actividad' => 'trote',
+        'duracion_min' => 45,
+        'calorias_dispositivo' => 400,
+        'fuente' => 'dispositivo',
+    ])->assertSessionHas('status', 'actividad-guardada');
 
-    expect($dia->fresh()->reparto_comidas)->toBeNull();
+    $reparto = app(RepartoComidasService::class)->paraElDia($dia->fresh());
+
+    expect(array_sum($reparto))->toEqualWithDelta(1.0, 0.0001)
+        ->and($reparto)->not->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
+
+    $this->actingAs($usuario)->get(route('planes.show', $dia))
+        ->assertOk()
+        ->assertSee('por tu actividad de hoy');
 });
 
-test('no se puede tocar el reparto del plan de otra persona', function () {
-    $dia = diaDeAcciones(usuarioDeAcciones());
+// ── Reabrir una comida reportada (sección 5.5) ────────────────────────────
 
-    $this->actingAs(usuarioDeAcciones())
-        ->post(route('planes.reparto', $dia), [
-            'reparto' => ['desayuno' => 20, 'almuerzo' => 45, 'cena' => 35],
-        ])
-        ->assertForbidden();
-});
-
-// ── Cambiar una respuesta del cierre (sección 5.5) ─────────────────────────
-
-test('el cierre muestra lo que se respondió por cada comida', function () {
+test('la tarjeta de cada comida muestra lo que se contestó en ella', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);
     $plan = comidaPlanificada($dia);
@@ -130,12 +113,12 @@ test('el cierre muestra lo que se respondió por cada comida', function () {
 
     $this->actingAs($usuario)->get(route('planes.show', $dia))
         ->assertOk()
-        ->assertSee('Lo que respondiste')
+        ->assertSee('Lo que comiste')
         ->assertSee('Me comí un sándwich extra.')
-        ->assertSee('Cambiar mi respuesta');
+        ->assertSee('Reabrir desayuno');
 });
 
-test('cambiar la respuesta borra la comida registrada y devuelve la pregunta', function () {
+test('reabrir la comida borra lo reportado y devuelve la pregunta', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);
     $plan = comidaPlanificada($dia);
@@ -143,39 +126,39 @@ test('cambiar la respuesta borra la comida registrada y devuelve la pregunta', f
     ComidaReal::factory()->for($plan, 'planComida')->create(['calorias_reales' => 640]);
 
     $this->actingAs($usuario)
-        ->delete(route('comida-real.destroy', $plan))
+        ->post(route('comidas.reabrir', [$dia, 'desayuno']))
         ->assertRedirect(route('planes.show', $dia))
-        ->assertSessionHas('status', 'comida-real-eliminada');
+        ->assertSessionHas('status', 'comida-reabierta');
 
     expect(ComidaReal::where('plan_comida_id', $plan->id)->count())->toBe(0)
         // Y calorias_consumidas del día vuelve a reflejar lo que queda.
         ->and((float) $dia->fresh()->calorias_consumidas)->toBe(0.0);
 
-    // La comida vuelve a estar "planificada", así que el cierre la pregunta.
+    // La comida vuelve a estar "planificada", así que se vuelve a preguntar.
     $this->actingAs($usuario)->get(route('planes.show', $dia))
-        ->assertSee('¿Cumpliste con lo sugerido?');
+        ->assertSee('Cumplí lo sugerido');
 });
 
-test('reabrir el día deja volver a responder por cada comida', function () {
+test('reabrir el día deja volver a reportar cada comida', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario, ['cerrado' => true, 'cerrado_en' => now()]);
     $plan = comidaPlanificada($dia);
 
     ComidaReal::factory()->for($plan, 'planComida')->create(['calorias_reales' => 640]);
 
-    // Con el día cerrado la respuesta se ve, pero no se puede cambiar.
+    // Con el día cerrado el reporte se ve, pero no se puede reabrir la comida.
     $this->actingAs($usuario)->get(route('planes.show', $dia))
-        ->assertSee('Lo que respondiste')
-        ->assertDontSee('Cambiar mi respuesta');
+        ->assertSee('Lo que comiste')
+        ->assertDontSee('Reabrir desayuno');
 
     $this->actingAs($usuario)->post(route('cierre.reabrir', $dia))
         ->assertSessionHas('status', 'dia-reabierto');
 
     $this->actingAs($usuario)->get(route('planes.show', $dia))
-        ->assertSee('Cambiar mi respuesta');
+        ->assertSee('Reabrir desayuno');
 });
 
-test('no se puede borrar lo registrado de un día cerrado sin reabrirlo antes', function () {
+test('no se puede reabrir una comida de un día cerrado sin reabrir el día antes', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario, ['cerrado' => true, 'cerrado_en' => now()]);
     $plan = comidaPlanificada($dia);
@@ -183,7 +166,7 @@ test('no se puede borrar lo registrado de un día cerrado sin reabrirlo antes', 
     ComidaReal::factory()->for($plan, 'planComida')->create(['calorias_reales' => 640]);
 
     $this->actingAs($usuario)
-        ->delete(route('comida-real.destroy', $plan))
+        ->post(route('comidas.reabrir', [$dia, 'desayuno']))
         ->assertSessionHas('error');
 
     expect(ComidaReal::where('plan_comida_id', $plan->id)->count())->toBe(1);
@@ -224,17 +207,41 @@ test('reiniciar el día lo vacía entero y lo deja abierto', function () {
         ->and($dia->cerrado)->toBeFalse();
 });
 
-test('reiniciar conserva el reparto propio del día', function () {
+test('reiniciar deja el día con el reparto balanceado, porque borra la actividad', function () {
     $usuario = usuarioDeAcciones();
-    $dia = diaDeAcciones($usuario, [
-        'reparto_comidas' => ['desayuno' => 0.2, 'almuerzo' => 0.45, 'cena' => 0.35],
-    ]);
+    $dia = diaDeAcciones($usuario);
+
+    ActividadFisica::factory()->for($dia, 'registroDiario')->create(['calorias_ajustadas' => 400]);
 
     $this->actingAs($usuario)->post(route('planes.resetear', $dia));
 
-    expect($dia->fresh()->reparto_comidas['almuerzo'])->toBe(0.45);
+    // El reparto ya no se persiste: se deriva del día (sección 5.14). Vaciar el
+    // día se lleva sus actividades, así que vuelve al balanceado por sí solo.
+    expect(app(RepartoComidasService::class)->paraElDia($dia->fresh()))
+        ->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS);
 });
 
+test('reiniciar solo vale para el día de hoy', function () {
+    $usuario = usuarioDeAcciones();
+    $ayer = diaDeAcciones($usuario, ['fecha' => now()->subDay()->toDateString()]);
+    $plan = comidaPlanificada($ayer);
+    ComidaReal::factory()->for($plan, 'planComida')->create();
+
+    // Un día pasado ya no puede volver a vivirse: vaciarlo solo borraría
+    // historial, así que ni el botón se pinta ni la ruta lo permite.
+    $this->actingAs($usuario)->get(route('planes.show', $ayer))
+        ->assertOk()
+        ->assertDontSee('Reiniciar este día')
+        ->assertSee('Reiniciar solo está disponible en el día de hoy.');
+
+    $this->actingAs($usuario)
+        ->post(route('planes.resetear', $ayer))
+        ->assertRedirect(route('planes.show', $ayer))
+        ->assertSessionHas('error');
+
+    expect($ayer->fresh()->planesComida()->count())->toBe(1)
+        ->and(ComidaReal::where('plan_comida_id', $plan->id)->count())->toBe(1);
+});
 test('eliminar el plan diario se lleva el día entero en cascada', function () {
     $usuario = usuarioDeAcciones();
     $dia = diaDeAcciones($usuario);

@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\MealDistributionUnavailableException;
+use App\Models\ActividadFisica;
 use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
@@ -106,9 +107,9 @@ it('reparte el objetivo del día entre las tres comidas según DISTRIBUCION_COMI
 
     expect($objetivos['dia']['calorias_objetivo'])->toEqualWithDelta(2112.0, 0.01)
         ->and($objetivos['por_comida'])->toHaveKeys(['desayuno', 'almuerzo', 'cena'])
-        ->and($objetivos['por_comida']['desayuno']['calorias'])->toEqualWithDelta(2112 * 0.25, 0.01)
+        ->and($objetivos['por_comida']['desayuno']['calorias'])->toEqualWithDelta(2112 * 0.30, 0.01)
         ->and($objetivos['por_comida']['almuerzo']['calorias'])->toEqualWithDelta(2112 * 0.40, 0.01)
-        ->and($objetivos['por_comida']['cena']['calorias'])->toEqualWithDelta(2112 * 0.35, 0.01)
+        ->and($objetivos['por_comida']['cena']['calorias'])->toEqualWithDelta(2112 * 0.30, 0.01)
         // Los macros se reparten con el mismo porcentaje que las calorías.
         ->and($objetivos['por_comida']['almuerzo']['proteina_g'])->toEqualWithDelta(80 * 1.8 * 0.40, 0.01);
 });
@@ -197,19 +198,19 @@ it('reserva las calorías de la cena cuando solo se escriben desayuno y almuerzo
 
     $contexto = $falso->llamadas[0]['contextoDia'];
 
-    // La cena no se resuelve, pero su 35% del día se aparta.
+    // La cena no se resuelve, pero su 30% del día se aparta.
     expect(array_keys($falso->llamadas[0]['comidas']))->toBe(['desayuno', 'almuerzo'])
         ->and($contexto['comidas_reservadas'])->toHaveKey('cena')
-        ->and($contexto['comidas_reservadas']['cena']['calorias'])->toEqualWithDelta(2112 * 0.35, 0.01);
+        ->and($contexto['comidas_reservadas']['cena']['calorias'])->toEqualWithDelta(2112 * 0.30, 0.01);
 
-    // Lo que queda (65% del día) se reparte entre desayuno y almuerzo con sus
-    // pesos relativos: 25/65 y 40/65.
-    $disponible = 2112 * 0.65;
+    // Lo que queda (70% del día) se reparte entre desayuno y almuerzo con sus
+    // pesos relativos: 30/70 y 40/70.
+    $disponible = 2112 * 0.70;
 
     expect($falso->llamadas[0]['comidas']['desayuno']['objetivos']['calorias'])
-        ->toEqualWithDelta($disponible * (0.25 / 0.65), 0.02)
+        ->toEqualWithDelta($disponible * (0.30 / 0.70), 0.02)
         ->and($falso->llamadas[0]['comidas']['almuerzo']['objetivos']['calorias'])
-        ->toEqualWithDelta($disponible * (0.40 / 0.65), 0.02);
+        ->toEqualWithDelta($disponible * (0.40 / 0.70), 0.02);
 
     expect($registroDiario->planesComida()->count())->toBe(2);
 });
@@ -320,64 +321,211 @@ it('nunca pisa una comida que ya tiene su ComidaReal registrada', function () {
 
 /*
 |--------------------------------------------------------------------------
-| Reparto por día (CLAUDE.md sección 5.14)
+| Reparto automático y saldo del día (CLAUDE.md secciones 5.14 y 5.21)
 |--------------------------------------------------------------------------
 */
 
-it('reparte con el reparto propio del día en vez del de fábrica', function () {
+it('reparte el día con el reparto balanceado cuando no hay actividad registrada', function () {
     proveedorFalso();
-    $usuario = usuarioParaDistribucion();
-    $registroDiario = registroDeHoyDe($usuario, [
-        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
-    ]);
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
 
     $objetivos = app(MealDistributionService::class)->objetivosDelRegistro($registroDiario);
 
-    expect($objetivos['por_comida']['desayuno']['calorias'])->toEqualWithDelta(2112 * 0.10, 0.01)
-        ->and($objetivos['por_comida']['almuerzo']['calorias'])->toEqualWithDelta(2112 * 0.50, 0.01)
-        ->and($objetivos['por_comida']['cena']['calorias'])->toEqualWithDelta(2112 * 0.40, 0.01)
-        // El día entero sigue sumando el mismo objetivo: solo cambia el reparto.
+    expect($objetivos['reparto'])->toBe(MealPlanGeneratorService::DISTRIBUCION_COMIDAS)
         ->and(array_sum(array_column($objetivos['por_comida'], 'calorias')))
         ->toEqualWithDelta(2112.0, 0.01);
 });
 
-it('manda al proveedor el presupuesto del reparto propio del día', function () {
-    $falso = proveedorFalso();
-    $registroDiario = registroDeHoyDe(usuarioParaDistribucion(), [
-        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
-    ]);
+it('desplaza el reparto hacia la comida posterior al entrenamiento', function () {
+    proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
 
-    app(MealDistributionService::class)->distribuirDia($registroDiario, [
+    // Entrenamiento de media mañana: la comida que viene después es el almuerzo.
+    actividadALas($registroDiario, 10, 'trote');
+
+    $objetivos = app(MealDistributionService::class)->objetivosDelRegistro($registroDiario->refresh());
+
+    expect($objetivos['reparto']['almuerzo'])->toBeGreaterThan(0.40)
+        ->and($objetivos['reparto']['desayuno'])->toBeLessThan(0.30)
+        // El día no crece: solo cambia su forma.
+        ->and(array_sum($objetivos['reparto']))->toEqualWithDelta(1.0, 0.0001);
+});
+
+it('le dice al proveedor cuál es la comida posterior al entrenamiento', function () {
+    $falso = proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
+
+    actividadALas($registroDiario, 10, 'pesas');
+
+    app(MealDistributionService::class)->distribuirDia($registroDiario->refresh(), [
         'desayuno' => 'huevos y pan',
         'almuerzo' => 'pollo y arroz',
         'cena' => 'ensalada y atún',
     ]);
 
-    $contexto = $falso->llamadas[0]['contextoDia'];
-
-    expect($contexto['reparto'])->toBe(['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40])
-        ->and($falso->llamadas[0]['comidas']['almuerzo']['objetivos']['calorias'])
-        ->toEqualWithDelta(2112 * 0.50, 0.01);
+    expect($falso->llamadas[0]['contextoDia']['comida_post_actividad'])->toBe('almuerzo');
 });
 
-it('reparte lo que queda con los pesos del reparto propio del día', function () {
-    $falso = proveedorFalso();
+it('calcula el saldo del día descontando solo lo que ya se reportó', function () {
+    proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
+
+    $plan = $registroDiario->planesComida()->create([
+        'tipo_comida' => 'desayuno',
+        'descripcion' => 'Huevos con pan',
+        'calorias_estimadas' => 600,
+        'proteina_g' => 30,
+        'grasa_g' => 20,
+        'carbohidratos_g' => 60,
+    ]);
+
+    ComidaReal::factory()->for($plan, 'planComida')->create([
+        'calorias_reales' => 700,
+        'proteina_g' => 35,
+        'grasa_g' => 25,
+        'carbohidratos_g' => 70,
+    ]);
+
+    $saldo = app(MealDistributionService::class)->saldoDelDia($registroDiario);
+
+    // Lo que cuenta es lo COMIDO (700), no lo planificado (600).
+    expect($saldo['consumido']['calorias'])->toEqualWithDelta(700.0, 0.01)
+        ->and($saldo['saldo']['calorias'])->toEqualWithDelta(2112.0 - 700.0, 0.01)
+        ->and($saldo['saldo']['proteina_g'])->toEqualWithDelta(80 * 1.8 - 35, 0.01)
+        ->and($saldo['comidas_pendientes'])->toBe(['almuerzo', 'cena'])
+        ->and($saldo['agotado'])->toBeFalse();
+});
+
+it('marca el saldo como agotado cuando ya se comió más del objetivo', function () {
+    proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
+
+    foreach (['desayuno', 'almuerzo', 'cena'] as $tipo) {
+        $plan = $registroDiario->planesComida()->create([
+            'tipo_comida' => $tipo,
+            'descripcion' => ucfirst($tipo),
+            'calorias_estimadas' => 700,
+            'proteina_g' => 30,
+            'grasa_g' => 20,
+            'carbohidratos_g' => 60,
+        ]);
+
+        ComidaReal::factory()->for($plan, 'planComida')->create([
+            'calorias_reales' => 800,
+            'proteina_g' => 30,
+            'grasa_g' => 20,
+            'carbohidratos_g' => 60,
+        ]);
+    }
+
+    $saldo = app(MealDistributionService::class)->saldoDelDia($registroDiario);
+
+    expect($saldo['agotado'])->toBeTrue()
+        ->and($saldo['saldo']['calorias'])->toBeLessThan(0)
+        ->and($saldo['comidas_pendientes'])->toBe([]);
+});
+
+it('no reescribe el texto de una comida ya cerrada aunque llegue en la petición', function () {
+    proveedorFalso();
     $registroDiario = registroDeHoyDe(usuarioParaDistribucion(), [
-        'reparto_comidas' => ['desayuno' => 0.10, 'almuerzo' => 0.50, 'cena' => 0.40],
+        'ingredientes_desayuno' => 'huevos y pan',
     ]);
 
-    // Solo almuerzo y cena: el desayuno reserva su 10% y el resto se reparte
-    // 50/40 entre las dos, no a partes iguales.
+    $plan = $registroDiario->planesComida()->create([
+        'tipo_comida' => 'desayuno',
+        'descripcion' => 'Huevos con pan',
+        'calorias_estimadas' => 600,
+        'proteina_g' => 30,
+        'grasa_g' => 20,
+        'carbohidratos_g' => 60,
+    ]);
+
+    ComidaReal::factory()->for($plan, 'planComida')->create(['calorias_reales' => 620]);
+
     app(MealDistributionService::class)->distribuirDia($registroDiario, [
+        'desayuno' => 'texto manipulado a mano',
         'almuerzo' => 'pollo y arroz',
-        'cena' => 'ensalada y atún',
     ]);
 
-    $comidas = $falso->llamadas[0]['comidas'];
-    $disponible = 2112 * 0.90;
+    expect($registroDiario->fresh()->ingredientes_desayuno)->toBe('huevos y pan');
+});
 
-    expect($comidas['almuerzo']['objetivos']['calorias'])
-        ->toEqualWithDelta($disponible * (0.50 / 0.90), 0.5)
-        ->and($comidas['cena']['objetivos']['calorias'])
-        ->toEqualWithDelta($disponible * (0.40 / 0.90), 0.5);
+/**
+ * Una actividad registrada a una hora concreta del día.
+ *
+ * `created_at` no es asignable en masa —ni debe serlo—, así que se fuerza
+ * después de crearla: la hora a la que se registró el entrenamiento es lo que
+ * decide qué comida es la posterior (CLAUDE.md sección 5.14), y dejarla al
+ * reloj del test haría que el resultado dependiera de cuándo se ejecute.
+ */
+function actividadALas(RegistroDiario $registroDiario, int $hora, string $tipo = 'trote'): ActividadFisica
+{
+    $actividad = $registroDiario->actividadesFisicas()->create([
+        'tipo' => $tipo,
+        'duracion_min' => 45,
+        'calorias_dispositivo' => 400,
+        'factor_correccion' => 0.85,
+        'calorias_ajustadas' => 340,
+    ]);
+
+    $actividad->forceFill([
+        'created_at' => $registroDiario->fecha->copy()->setTime($hora, 0),
+    ])->save();
+
+    return $actividad;
+}
+
+it('rehace las comidas abiertas cuando una comida cerrada movió el saldo del día', function () {
+    $falso = proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
+    $servicio = app(MealDistributionService::class);
+
+    $servicio->distribuirDia($registroDiario, [
+        'desayuno' => 'huevos y pan',
+        'almuerzo' => 'pollo y arroz',
+    ]);
+
+    $desayuno = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->first();
+
+    // Se comió 300 kcal más de lo que le tocaba: el presupuesto con el que se
+    // generó el almuerzo ya no vale.
+    ComidaReal::factory()->for($desayuno, 'planComida')->create([
+        'calorias_reales' => (float) $desayuno->calorias_estimadas + 300,
+    ]);
+
+    // Mismo texto, sin "rehacer": aun así el almuerzo se regenera.
+    $servicio->distribuirDia($registroDiario->refresh(), [
+        'desayuno' => 'huevos y pan',
+        'almuerzo' => 'pollo y arroz',
+    ]);
+
+    expect(array_keys($falso->llamadas[1]['comidas']))->toBe(['almuerzo'])
+        // Y lo hace contra lo que de verdad queda, no contra el plan anterior.
+        ->and($falso->llamadas[1]['contextoDia']['comidas_fijas']['desayuno']['calorias'])
+        ->toEqualWithDelta((float) $desayuno->calorias_estimadas + 300, 0.01);
+});
+
+it('no rehace nada si la comida cerrada cumplió justo lo planificado', function () {
+    $falso = proveedorFalso();
+    $registroDiario = registroDeHoyDe(usuarioParaDistribucion());
+    $servicio = app(MealDistributionService::class);
+
+    $servicio->distribuirDia($registroDiario, [
+        'desayuno' => 'huevos y pan',
+        'almuerzo' => 'pollo y arroz',
+    ]);
+
+    $desayuno = $registroDiario->planesComida()->where('tipo_comida', 'desayuno')->first();
+
+    ComidaReal::factory()->for($desayuno, 'planComida')->create([
+        'calorias_reales' => (float) $desayuno->calorias_estimadas,
+    ]);
+
+    // Pulsar el botón sin que haya pasado nada no gasta una llamada.
+    expect(fn () => $servicio->distribuirDia($registroDiario->refresh(), [
+        'desayuno' => 'huevos y pan',
+        'almuerzo' => 'pollo y arroz',
+    ]))->toThrow(MealDistributionUnavailableException::class);
+
+    expect($falso->llamadas)->toHaveCount(1);
 });

@@ -45,6 +45,13 @@ class MealDistributionService
     /**
      * Campos del perfil sin los cuales no hay objetivo calórico que repartir.
      */
+    /**
+     * Diferencia en kcal entre lo comido y lo planificado por debajo de la cual
+     * el saldo del día se considera intacto. Solo absorbe el ruido de redondeo:
+     * cualquier desviación real tiene que llegar al reparto de lo que falta.
+     */
+    public const TOLERANCIA_SALDO_KCAL = 1.0;
+
     public const PARAMETROS_REQUERIDOS = [
         'peso_kg',
         'nivel_actividad',
@@ -92,10 +99,67 @@ class MealDistributionService
     }
 
     /**
+     * El saldo del día, macro a macro: cuánto queda del objetivo después de lo
+     * que ya se reportó como comido (CLAUDE.md sección 5.21).
+     *
+     * Es la cifra que guía "Ajustar mi plan" y la que la pantalla enseña en el
+     * panel de objetivo ("te quedan 40 g de proteína"). La calcula PHP a partir
+     * de las ComidaReal del día, nunca el modelo (regla 7 de la sección 13), y
+     * no persiste nada: es una lectura del estado actual.
+     *
+     * @return array{objetivo: array<string, float>, consumido: array<string, float>, saldo: array<string, float>, comidas_pendientes: array<int, string>, agotado: bool}
+     */
+    public function saldoDelDia(RegistroDiario $registroDiario): array
+    {
+        $objetivos = $this->objetivosDelRegistro($registroDiario);
+
+        $objetivo = [
+            'calorias' => $objetivos['dia']['calorias_objetivo'],
+            'proteina_g' => $objetivos['dia']['proteina_g'],
+            'grasa_g' => $objetivos['dia']['grasa_g'],
+            'carbohidratos_g' => $objetivos['dia']['carbohidratos_g'],
+        ];
+
+        $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
+
+        $consumido = ['calorias' => 0.0, 'proteina_g' => 0.0, 'grasa_g' => 0.0, 'carbohidratos_g' => 0.0];
+        $pendientes = [];
+
+        foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
+            $real = $planes->get($tipoComida)?->comidaReal;
+
+            if ($real === null) {
+                $pendientes[] = $tipoComida;
+
+                continue;
+            }
+
+            $consumido['calorias'] += (float) $real->calorias_reales;
+            $consumido['proteina_g'] += (float) $real->proteina_g;
+            $consumido['grasa_g'] += (float) $real->grasa_g;
+            $consumido['carbohidratos_g'] += (float) $real->carbohidratos_g;
+        }
+
+        $saldo = [];
+
+        foreach ($objetivo as $macro => $valor) {
+            $saldo[$macro] = $valor - $consumido[$macro];
+        }
+
+        return [
+            'objetivo' => $objetivo,
+            'consumido' => $consumido,
+            'saldo' => $saldo,
+            'comidas_pendientes' => $pendientes,
+            'agotado' => $saldo['calorias'] <= 0,
+        ];
+    }
+
+    /**
      * Objetivos del día y su reparto nominal por comida, a partir del objetivo
      * calórico vigente del usuario (users.calorias_objetivo — sección 4.10).
      *
-     * @param  array<string, float>|null  $reparto  proporción por comida; null usa el reparto habitual del usuario
+     * @param  array<string, float>|null  $reparto  proporción por comida; null usa el reparto balanceado de partida
      * @return array{dia: array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}, por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}
      */
     public function objetivosDelDia(User $usuario, ?array $reparto = null): array
@@ -110,7 +174,7 @@ class MealDistributionService
             $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
         );
 
-        $reparto ??= $this->reparto->habitual($usuario);
+        $reparto ??= $this->reparto->balanceado();
 
         $porComida = [];
 
@@ -140,9 +204,14 @@ class MealDistributionService
     }
 
     /**
-     * "Generar distribución": guarda los textos de las comidas que llegan y
-     * pide al proveedor, en una sola llamada, el reparto de las que haya que
-     * resolver.
+     * "Ajustar mi plan": guarda los textos de las comidas que llegan y pide al
+     * proveedor, en una sola llamada, el reparto de las que haya que resolver.
+     *
+     * El nombre de cara al usuario es ese y no "Generar distribución" porque lo
+     * que hace, en cuanto hay comidas cerradas, es exactamente ajustar: mide
+     * cuánto queda del objetivo del día después de lo ya comido de verdad y
+     * reparte ESE saldo entre las comidas que faltan. Las cerradas no se tocan
+     * (sección 5.5).
      *
      * Los textos se guardan siempre, aunque la generación falle después: no se
      * pierde lo que el usuario escribió o dictó.
@@ -164,6 +233,7 @@ class MealDistributionService
         $presupuestos = $this->presupuestos(
             $this->objetivosDelRegistro($registroDiario),
             $estado,
+            $this->reparto->explicacion($registroDiario)['comida'],
         );
 
         $distribuciones = $this->proveedor->distribuirDia(
@@ -197,6 +267,14 @@ class MealDistributionService
     {
         $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
 
+        // ¿Se movió el saldo del día desde que se hicieron los planes que
+        // siguen abiertos? Si alguna comida cerrada se comió por encima (o por
+        // debajo) de lo que se le había planificado, el presupuesto con el que
+        // se generaron las que faltan ya no vale, y "Ajustar mi plan" tiene que
+        // rehacerlas aunque su texto no haya cambiado — es justamente para eso
+        // que existe el botón (sección 5.3).
+        $saldoDesplazado = $this->saldoDesplazado($planes);
+
         $estado = ['planes' => [], 'fijas' => [], 'a_generar' => [], 'reservadas' => []];
 
         foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
@@ -204,6 +282,18 @@ class MealDistributionService
             $estado['planes'][$tipoComida] = $plan;
 
             $textoAnterior = $registroDiario->{$this->columnaDeIngredientes($tipoComida)};
+
+            // Una comida ya cerrada no se regenera ni se le reescribe el texto:
+            // se preserva el historial "planificado vs. ejecutado" (sección 4) y
+            // su presupuesto ya está gastado (sección 5.5). Se sale antes de
+            // guardar nada para que ni siquiera un formulario manipulado a mano
+            // pueda cambiarle el texto con el que se generó.
+            if ($plan?->comidaReal !== null) {
+                $estado['fijas'][$tipoComida] = $this->fijaDesdePlan($plan, $plan->comidaReal);
+
+                continue;
+            }
+
             $texto = array_key_exists($tipoComida, $textos)
                 ? $this->normalizarTexto($textos[$tipoComida])
                 : $textoAnterior;
@@ -212,16 +302,8 @@ class MealDistributionService
                 $this->guardarIngredientes($registroDiario, $tipoComida, $texto);
             }
 
-            // Una comida ya registrada nunca se regenera: se preserva el
-            // historial "planificado vs. ejecutado" (sección 4).
-            if ($plan?->comidaReal !== null) {
-                $estado['fijas'][$tipoComida] = $this->fijaDesdePlan($plan, $plan->comidaReal);
-
-                continue;
-            }
-
             $hayQueGenerar = filled($texto)
-                && ($plan === null || $texto !== $textoAnterior || $rehacer === $tipoComida);
+                && ($plan === null || $texto !== $textoAnterior || $rehacer === $tipoComida || $saldoDesplazado);
 
             if ($hayQueGenerar) {
                 $estado['a_generar'][$tipoComida] = (string) $texto;
@@ -242,6 +324,37 @@ class MealDistributionService
     }
 
     /**
+     * ¿Alguna comida cerrada se comió por una cifra distinta de la que se le
+     * había planificado?
+     *
+     * Es la señal de que el saldo del día se movió después de generar los
+     * planes que siguen abiertos: esos se calcularon contra un presupuesto que
+     * ya no es el que queda. Una comida cerrada con "cumplí lo sugerido" no la
+     * dispara —lo real y lo planificado coinciden—, así que pulsar el botón sin
+     * que haya pasado nada sigue sin gastar una llamada.
+     *
+     * @param  Collection<string, PlanComida>  $planes
+     */
+    private function saldoDesplazado($planes): bool
+    {
+        foreach ($planes as $plan) {
+            $real = $plan->comidaReal;
+
+            if ($real === null) {
+                continue;
+            }
+
+            $desviacion = abs((float) $real->calorias_reales - (float) $plan->calorias_estimadas);
+
+            if ($desviacion > self::TOLERANCIA_SALDO_KCAL) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Reparte lo que queda del objetivo diario entre las comidas a generar,
      * después de descontar lo ya fijado y lo reservado para las comidas que el
      * usuario todavía no ha escrito.
@@ -250,7 +363,7 @@ class MealDistributionService
      * @param  array{planes: array<string, PlanComida|null>, fijas: array<string, array<string, mixed>>, a_generar: array<string, string>, reservadas: array<int, string>}  $estado
      * @return array{comidas: array<string, array{texto: string, objetivos: array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}}>, contexto_dia: array<string, mixed>}
      */
-    private function presupuestos(array $objetivos, array $estado): array
+    private function presupuestos(array $objetivos, array $estado, ?string $comidaPostActividad = null): array
     {
         $macros = ['calorias', 'proteina_g', 'grasa_g', 'carbohidratos_g'];
 
@@ -314,6 +427,16 @@ class MealDistributionService
                 'reparto' => $reparto,
                 'comidas_fijas' => $estado['fijas'],
                 'comidas_reservadas' => $reservadas,
+                // La comida posterior al entrenamiento (sección 5.14). Va como
+                // contexto y no como un objetivo de macros distinto: cambiar
+                // solo los carbohidratos de una comida rompería la coherencia
+                // entre sus macros y sus calorías. Lo que se le pide al modelo
+                // es que, DENTRO de esa comida, prefiera los carbohidratos.
+                'comida_post_actividad' => $comidaPostActividad,
+                // Cuánto del objetivo del día ya está comido de verdad: es lo
+                // que hace que "Ajustar mi plan" reparta sobre el saldo real y
+                // no sobre el objetivo entero (sección 5.3).
+                'calorias_ya_comidas' => array_sum(array_column($estado['fijas'], 'calorias')),
             ],
         ];
     }
@@ -351,6 +474,7 @@ class MealDistributionService
 
         return [
             'tipo_comida' => $tipoComida,
+            'origen' => PlanComida::ORIGEN_PLAN,
             'descripcion' => $distribucion['descripcion'] !== ''
                 ? $distribucion['descripcion']
                 : ucfirst($tipoComida),

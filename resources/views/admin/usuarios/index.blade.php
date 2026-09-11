@@ -28,17 +28,10 @@
 
     <x-tudi.flash :mensajes="[
         'usuario-actualizado' => __('Cuenta actualizada.'),
-        'codigo-regenerado' => __('Código nuevo generado.'),
         'usuario-eliminado' => __('Cuenta eliminada.'),
+        'plan-premium' => __('Cuenta habilitada en Premium.'),
+        'plan-degradado' => __('Cuenta devuelta al plan Gratis.'),
     ]" />
-
-    @if (session('codigo-generado'))
-        <div class="tudi-panel mb-4">
-            <p class="tudi-label">{{ __('Código nuevo') }}</p>
-            <p class="tudi-num mt-2 font-mono text-3xl tracking-[0.25em] text-tudi-lime">{{ session('codigo-generado') }}</p>
-            <p class="mt-2 text-[13px] text-tudi-on-dark-2">{{ __('El código anterior de esa cuenta ya no sirve.') }}</p>
-        </div>
-    @endif
 
     <div class="space-y-4">
         {{-- ══ Búsqueda y filtro ══ --}}
@@ -77,6 +70,11 @@
                                     <span class="sr-only">{{ __($usuario->estado) }}</span>
                                     @if ($usuario->esAdministrador())
                                         <span class="tudi-chip tudi-chip-solid">{{ __('admin') }}</span>
+                                    @endif
+                                    @if ($usuario->tienePremium())
+                                        <span class="tudi-chip tudi-chip-solid text-tudi-lime">
+                                            {{ $usuario->enPrueba() ? __('prueba') : __('premium') }}
+                                        </span>
                                     @endif
                                     @if ($esUnoMismo)
                                         <span class="tudi-chip">{{ __('tú') }}</span>
@@ -122,9 +120,16 @@
                                     </form>
                                 @endif
 
-                                <form method="post" action="{{ route('admin.usuarios.codigo', $usuario) }}">
+                                {{--
+                                    Premium a mano hasta que cobre la pasarela de
+                                    pago (sección 5.18). Quitarlo no cierra nada:
+                                    la cuenta sigue entrando y con su historial.
+                                --}}
+                                <form method="post" action="{{ route('admin.usuarios.plan', $usuario) }}">
                                     @csrf
-                                    <button type="submit" class="tudi-btn tudi-btn-secondary">{{ __('Nuevo código') }}</button>
+                                    <button type="submit" class="tudi-btn tudi-btn-secondary">
+                                        {{ $usuario->tienePremium() ? __('Quitar Premium') : __('Dar Premium') }}
+                                    </button>
                                 </form>
 
                                 <form method="post" action="{{ route('admin.usuarios.update', $usuario) }}">

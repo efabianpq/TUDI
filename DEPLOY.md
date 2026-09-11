@@ -42,7 +42,7 @@ php artisan key:generate
 # SESSION_DRIVER=database — NUNCA `file` en producción: ver la sección 8.
 #
 # OPENAI_API_KEY: clave de la API de OpenAI (platform.openai.com).
-# La usa "Generar distribución" y el cierre del día (CLAUDE.md sección 4.12),
+# La usan "Ajustar mi plan" y el reporte de comidas (CLAUDE.md sección 5.3),
 # y también el plan B del dictado por voz, que está apagado (sección 5.9).
 # Sin ella el resto de la aplicación funciona igual y esos botones muestran un
 # mensaje pidiendo configurarla. Requiere salida HTTPS a api.openai.com: si el
@@ -184,7 +184,7 @@ Un `504 Gateway Time-out` de nginx significa **una sola cosa**: PHP no contestó
    - Si `/up` responde y `/dashboard` da 504 → el problema es de la aplicación: sigue por el punto 3.
 2. **Pool de PHP-FPM.** En hosting compartido `pm.max_children` suele estar entre 5 y 15. **Cada petición en curso ocupa un proceso entero**, y ese proceso no atiende a nadie más mientras espera. Si todos están ocupados, las peticiones nuevas se encolan y acaban en 504 aunque no hagan nada pesado. Es el mecanismo por el que un puñado de usuarios simultáneos tumba el sitio entero.
 3. **Lo que hace esperar a un worker en esta aplicación**, de mayor a menor riesgo:
-   - **La llamada al proveedor de IA** ("Generar distribución" y "Cerrar mi día"). Acotada con `OPENAI_TIMEOUT` (20 s por defecto), `OPENAI_CONNECT_TIMEOUT` (5 s) y `OPENAI_PRESUPUESTO_TOTAL` (25 s: el techo del conjunto de intentos, incluida la corrección de macros). **`OPENAI_PRESUPUESTO_TOTAL` debe quedar por debajo del `fastcgi_read_timeout` del servidor**, para que corte la aplicación —con un mensaje al usuario— y no el gateway. Si el hosting **bloquea la salida HTTPS**, cada intento consume el timeout entero: `tudi:diagnostico` lo detecta explícitamente.
+   - **La llamada al proveedor de IA** ("Ajustar mi plan" y cerrar una comida contándola por escrito). Acotada con `OPENAI_TIMEOUT` (20 s por defecto), `OPENAI_CONNECT_TIMEOUT` (5 s) y `OPENAI_PRESUPUESTO_TOTAL` (25 s: el techo del conjunto de intentos, incluida la corrección de macros). **`OPENAI_PRESUPUESTO_TOTAL` debe quedar por debajo del `fastcgi_read_timeout` del servidor**, para que corte la aplicación —con un mensaje al usuario— y no el gateway. Si el hosting **bloquea la salida HTTPS**, cada intento consume el timeout entero: `tudi:diagnostico` lo detecta explícitamente.
    - **El envío de correo del alta de cuenta.** Va en cola precisamente para no bloquear el registro esperando al SMTP. Requiere que el cron del scheduler esté corriendo (sección 4); si `tudi:diagnostico` muestra trabajos acumulados en cola, el cron no está activo.
    - **La base de datos.** `tudi:diagnostico` mide la latencia de conexión; por encima de ~500 ms el hosting está saturado o la instancia de MySQL está mal dimensionada.
 4. **Driver de sesión.** `SESSION_DRIVER` **no debe ser `file`**. Con el driver de archivo, cada petición bloquea el archivo de sesión hasta terminar, así que dos peticiones del mismo usuario se serializan: con llamadas a la IA de varios segundos, dos pestañas abiertas bastan para provocar un 504. El valor correcto en este proyecto es `database` (requiere la tabla `sessions`, que crea la migración inicial).

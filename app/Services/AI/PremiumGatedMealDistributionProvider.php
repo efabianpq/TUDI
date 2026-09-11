@@ -15,8 +15,8 @@ use Illuminate\Contracts\Auth\Factory as Auth;
  *
  * El requisito es que el control viva en el mismo punto donde hoy se invoca al
  * proveedor, sin duplicarse. Ese punto es exactamente esta interfaz: la cruzan
- * MealDistributionService (al distribuir el día) y CierreFeedbackService (al
- * cerrarlo), y no hay ningún otro camino hacia Gemini. Envolviéndola, las dos
+ * MealDistributionService (al ajustar el plan) y ReporteComidaService (al cerrar
+ * una comida), y no hay ningún otro camino hacia el proveedor. Envolviéndola, las dos
  * funciones quedan cubiertas por una sola comprobación y ningún camino nuevo
  * que se añada mañana puede saltársela por olvido.
  *

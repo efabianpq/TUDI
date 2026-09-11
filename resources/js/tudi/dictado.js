@@ -208,17 +208,31 @@ function dictarConElNavegador(campo) {
     const porTramos = necesitaReenganche();
 
     let definitivo = '';
+    // Lo que el reconocedor todavía no ha confirmado como definitivo. En
+    // iOS Safari, pulsar "Listo" no siempre dispara el evento 'end' a
+    // tiempo (a veces no llega nunca si el navegador estaba a mitad de un
+    // reenganche), así que no basta con esperarlo: hay que insertar con lo
+    // que se tenga en ese instante, confirmado o no.
+    let parcialActual = '';
     let terminado = false;
     let cancelado = false;
+    let cerrado = false;
     let huboAlgo = false;
     let tramosMudos = 0;
     let reconocimiento = null;
 
     const cerrarConTexto = () => {
+        if (cerrado) {
+            return;
+        }
+
+        cerrado = true;
         popup.cerrar();
 
-        if (huboAlgo) {
-            insertarTexto(campo, definitivo);
+        const texto = huboAlgo ? `${definitivo} ${parcialActual}`.trim() : '';
+
+        if (texto) {
+            insertarTexto(campo, texto);
         }
     };
 
@@ -250,10 +264,18 @@ function dictarConElNavegador(campo) {
             huboAlgo = true;
             huboEnEsteTramo = true;
             tramosMudos = 0;
+            parcialActual = provisional;
             popup.parcial(`${definitivo} ${provisional}`.trim());
         });
 
         sesion.addEventListener('error', (evento) => {
+            // Una vez que el usuario pulsó "Listo" o "Cancelar" ya no importa lo
+            // que le pase a esta sesión: el texto (si lo había) ya se insertó
+            // o se descartó.
+            if (terminado || cancelado) {
+                return;
+            }
+
             // "no-speech" y "aborted" son el final normal de un tramo en
             // Safari, no un fallo: se dejan para que `end` decida.
             if (evento.error === 'no-speech' || evento.error === 'aborted') {
@@ -353,7 +375,13 @@ function dictarConElNavegador(campo) {
     popup.abrir({
         alTerminar: () => {
             terminado = true;
-            reconocimiento?.stop();
+            cerrarConTexto();
+
+            try {
+                reconocimiento?.stop();
+            } catch {
+                // Ya se insertó el texto; parar el micrófono es un extra.
+            }
         },
         alCancelar: () => {
             terminado = true;

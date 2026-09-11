@@ -193,8 +193,8 @@ test('the plan detail shows the three sections of the daily flow', function () {
         ->assertSee('desayuno')
         ->assertSee('almuerzo')
         ->assertSee('cena')
-        // Un solo botón para las tres comidas (hallazgo 2).
-        ->assertSee('Generar distribución')
+        // Un solo botón para las tres comidas.
+        ->assertSee('Calcular mi plan')
         // El objetivo del día, repartido: 2112 kcal.
         ->assertSee('2.112');
 });
@@ -238,7 +238,7 @@ test('one single button distributes every meal that has text, in one call', func
 
     $response->assertSessionHasNoErrors()
         ->assertRedirect(route('planes.show', $registroDiario))
-        ->assertSessionHas('status', 'distribucion-generada');
+        ->assertSessionHas('status', 'plan-ajustado');
 
     // Una sola llamada al proveedor para el día entero.
     Http::assertSentCount(1);
@@ -340,7 +340,7 @@ test('rehacer regenerates just that meal', function () {
     $this->actingAs($usuario)->post(route('planes.distribucion', $registroDiario), [
         'ingredientes' => ['desayuno' => 'dos huevos', 'almuerzo' => 'pollo con arroz'],
         'rehacer' => 'desayuno',
-    ])->assertSessionHas('status', 'distribucion-generada');
+    ])->assertSessionHas('status', 'plan-ajustado');
 
     expect($registroDiario->planesComida()->count())->toBe(2)
         ->and($registroDiario->planesComida()->where('tipo_comida', 'almuerzo')->value('id'))->toBe($idAlmuerzo);
@@ -473,9 +473,12 @@ test('closing the day from the plan page comes back to the plan page and freezes
         'ingredientes' => ['desayuno' => 'dos huevos y media palta'],
     ]);
 
+    // Cerrar el desayuno es lo que da algo que consolidar (sección 5.5).
+    $this->actingAs($usuario)->post(route('comidas.cerrar', [$registroDiario, 'desayuno']), ['cumplio' => '1']);
+
     $response = $this->actingAs($usuario)
         ->from(route('planes.show', $registroDiario))
-        ->post(route('cierre.cerrar', $registroDiario));
+        ->post(route('cierre.cerrar', $registroDiario), ['confirmar_sin_reportar' => '1']);
 
     $response->assertRedirect(route('planes.show', $registroDiario))->assertSessionHas('status', 'dia-cerrado');
 

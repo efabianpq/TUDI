@@ -44,8 +44,15 @@ interface MealDistributionProviderInterface
      * NutritionCalculatorService (la única fuente de verdad de las fórmulas —
      * CLAUDE.md sección 5).
      *
+     * `comida_post_actividad` dice cuál de las comidas viene después del
+     * entrenamiento del día, para que el proveedor prefiera los carbohidratos
+     * DENTRO de esa comida (sección 5.14). Va como contexto y no como un
+     * objetivo de macros distinto: retocar solo los carbohidratos de una comida
+     * rompería la coherencia entre sus macros y sus calorías. Un proveedor que
+     * lo ignore sigue cumpliendo el contrato.
+     *
      * @param  array<string, array{texto: string, objetivos: array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}}>  $comidas  comidas a generar, indexadas por tipo (desayuno|almuerzo|cena)
-     * @param  array{calorias_objetivo_dia: float, proteina_objetivo_dia_g: float, grasa_objetivo_dia_g: float, carbohidratos_objetivo_dia_g: float, reparto: array<string, float>, comidas_fijas: array<string, array{descripcion: string, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, comidas_reservadas: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>}  $contextoDia
+     * @param  array{calorias_objetivo_dia: float, proteina_objetivo_dia_g: float, grasa_objetivo_dia_g: float, carbohidratos_objetivo_dia_g: float, reparto: array<string, float>, comidas_fijas: array<string, array{descripcion: string, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, comidas_reservadas: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, comida_post_actividad: string|null, calorias_ya_comidas: float}  $contextoDia
      * @return array<string, array{descripcion: string, preparacion: string, notas: string, ingredientes: array<int, array{nombre: string, porcion: string, cantidad_g: float, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>}> una entrada por comida resuelta, indexada por tipo
      *
      * @throws MealDistributionUnavailableException cuando el proveedor no está configurado, falla, o devuelve algo que no cumple el contrato

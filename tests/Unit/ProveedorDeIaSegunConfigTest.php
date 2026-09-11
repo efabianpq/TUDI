@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\AI\CuotaDiariaMealDistributionProvider;
 use App\Services\AI\GeminiMealDistributionProvider;
 use App\Services\AI\GeminiTranscripcionProvider;
 use App\Services\AI\MealDistributionProviderInterface;
@@ -21,15 +22,28 @@ use Tests\TestCase;
  */
 uses(TestCase::class);
 
-function envuelto(object $instancia, string $decorador): object
+function envuelto(object $instancia, string ...$decoradores): object
 {
-    return (new ReflectionProperty($decorador, 'siguiente'))->getValue($instancia);
+    foreach ($decoradores as $decorador) {
+        $instancia = (new ReflectionProperty($decorador, 'siguiente'))->getValue($instancia);
+    }
+
+    return $instancia;
+}
+
+/**
+ * La distribución va envuelta en DOS decoradores (secciones 5.18 y 5.20):
+ * el control de plan por fuera y la cuota diaria por dentro.
+ */
+function motorDeDistribucion(object $instancia): object
+{
+    return envuelto($instancia, PremiumGatedMealDistributionProvider::class, CuotaDiariaMealDistributionProvider::class);
 }
 
 it('usa OpenAI por defecto para la distribución de comidas', function () {
     $resuelto = $this->app->make(MealDistributionProviderInterface::class);
 
-    expect(envuelto($resuelto, PremiumGatedMealDistributionProvider::class))
+    expect(motorDeDistribucion($resuelto))
         ->toBeInstanceOf(OpenAiMealDistributionProvider::class);
 });
 
@@ -38,7 +52,7 @@ it('cambia a Gemini cuando AI_PROVEEDOR_DISTRIBUCION=gemini', function () {
 
     $resuelto = $this->app->make(MealDistributionProviderInterface::class);
 
-    expect(envuelto($resuelto, PremiumGatedMealDistributionProvider::class))
+    expect(motorDeDistribucion($resuelto))
         ->toBeInstanceOf(GeminiMealDistributionProvider::class);
 });
 
@@ -48,7 +62,7 @@ it('cae a OpenAI si el valor de AI_PROVEEDOR_DISTRIBUCION no se reconoce', funct
 
     $resuelto = $this->app->make(MealDistributionProviderInterface::class);
 
-    expect(envuelto($resuelto, PremiumGatedMealDistributionProvider::class))
+    expect(motorDeDistribucion($resuelto))
         ->toBeInstanceOf(OpenAiMealDistributionProvider::class);
 });
 
@@ -74,10 +88,7 @@ it('los dos proveedores se eligen de forma independiente', function () {
         'services.ai_provider.transcripcion' => 'openai',
     ]);
 
-    $distribucion = envuelto(
-        $this->app->make(MealDistributionProviderInterface::class),
-        PremiumGatedMealDistributionProvider::class,
-    );
+    $distribucion = motorDeDistribucion($this->app->make(MealDistributionProviderInterface::class));
     $transcripcion = envuelto(
         $this->app->make(TranscripcionAudioProviderInterface::class),
         PremiumGatedTranscripcionProvider::class,

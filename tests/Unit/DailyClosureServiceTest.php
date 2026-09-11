@@ -340,3 +340,33 @@ test('el diagnóstico se da por listo con siete días y un pesaje en cada semana
         ->and($diagnostico['listo'])->toBeTrue()
         ->and($diagnostico['ritmo_pct'])->not->toBeNull();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Qué falta por reportar (CLAUDE.md sección 5.5)
+|--------------------------------------------------------------------------
+*/
+
+it('lista las tres comidas cuando el día no tiene nada reportado', function () {
+    $registroDiario = RegistroDiario::factory()->for(usuarioDeCierre(), 'usuario')->create(['fecha' => now()->toDateString()]);
+
+    expect(app(DailyClosureService::class)->comidasSinReportar($registroDiario))
+        ->toBe(['desayuno', 'almuerzo', 'cena']);
+});
+
+it('deja fuera las comidas ya cerradas, en el orden de DISTRIBUCION_COMIDAS', function () {
+    $registroDiario = RegistroDiario::factory()->for(usuarioDeCierre(), 'usuario')->create(['fecha' => now()->toDateString()]);
+
+    $almuerzo = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'almuerzo',
+    ]);
+
+    ComidaReal::factory()->for($almuerzo, 'planComida')->create();
+
+    // Un plan sin ComidaReal sigue contando como pendiente: planificar no es
+    // haber comido.
+    PlanComida::factory()->for($registroDiario, 'registroDiario')->create(['tipo_comida' => 'cena']);
+
+    expect(app(DailyClosureService::class)->comidasSinReportar($registroDiario))
+        ->toBe(['desayuno', 'cena']);
+});
