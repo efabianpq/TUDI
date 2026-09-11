@@ -712,80 +712,7 @@
                     @endif
                 </div>
 
-                {{--
-                    ── Resultado real del día (CLAUDE.md sección 5.5) ──
-                    El espejo de "Objetivo del día": las mismas cuatro cifras,
-                    pero las que se comieron de verdad.
-                --}}
-                <div class="tudi-card-inset mt-5 rounded-tudi-sm">
-                    <div class="flex items-end justify-between gap-4">
-                        <span class="tudi-label pb-1">
-                            {{ $registroDiario->cerrado ? __('Resultado real del día') : __('Lo que llevas comido') }}
-                        </span>
-                        <span class="flex items-baseline gap-1.5">
-                            <span class="tudi-num text-[30px]">{{ $kcal($resumenCierre['calorias_consumidas']) }}</span>
-                            <span class="tudi-meta">/ {{ $kcal($resumenCierre['calorias_objetivo']) }} kcal</span>
-                        </span>
-                    </div>
-
-                    <div class="mt-3 space-y-3">
-                        @foreach ([
-                            ['tipo' => 'proteina', 'real' => $resumenCierre['proteina_consumida_g'], 'objetivo' => $resumenCierre['proteina_objetivo_g'], 'color' => 'var(--tudi-lime-700)'],
-                            ['tipo' => 'grasa', 'real' => $resumenCierre['grasa_consumida_g'], 'objetivo' => $resumenCierre['grasa_objetivo_g'], 'color' => 'var(--tudi-amber)'],
-                            ['tipo' => 'carbohidratos', 'real' => $resumenCierre['carbohidratos_consumidos_g'], 'objetivo' => $resumenCierre['carbohidratos_objetivo_g'], 'color' => 'var(--tudi-ink)'],
-                        ] as $macro)
-                            <div>
-                                <div class="flex items-baseline justify-between gap-2">
-                                    {{-- Icono Y palabra: en esta tarjeta cabe, y es donde el
-                                         usuario compara lo comido contra su objetivo. --}}
-                                    <span class="flex items-center gap-2">
-                                        <x-tudi.macro :tipo="$macro['tipo']" />
-                                        <x-tudi.macro :tipo="$macro['tipo']" variante="palabra" class="text-[13px] font-semibold" />
-                                    </span>
-                                    <span class="tudi-meta">
-                                        {{-- Los días cerrados antes de que el snapshot guardara grasa y
-                                             carbohidratos no tienen estas cifras: se dicen ausentes, no cero. --}}
-                                        @if ($macro['real'] === null || $macro['objetivo'] === null)
-                                            —
-                                        @else
-                                            <span class="text-tudi-ink">{{ $gramos($macro['real']) }}</span>
-                                            / {{ $gramos($macro['objetivo']) }} g
-                                        @endif
-                                    </span>
-                                </div>
-                                <span class="tudi-bar on-light mt-1.5 block"
-                                      style="--pct: {{ $macro['real'] === null || $macro['objetivo'] === null ? 0 : $porcentaje($macro['real'], $macro['objetivo']) }}">
-                                    <span style="background: {{ $macro['color'] }}"></span>
-                                </span>
-                            </div>
-                        @endforeach
-                    </div>
-
-                    {{--
-                        El déficit sí se queda: es la única de las cifras del
-                        cierre que no está ya en las barras de arriba —incluye el
-                        gasto por actividad, que no es un macro— y es el número
-                        que persigue todo el producto (sección 7). Las otras
-                        cuatro (objetivo, consumidas, proteína) se retiraron
-                        porque repetían la misma tarjeta dos veces.
-                    --}}
-                    <div class="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-tudi-border pt-3">
-                        <span class="tudi-label">{{ __('Déficit estimado') }}</span>
-                        <span class="flex items-baseline gap-1.5">
-                            <span @class([
-                                'tudi-num text-xl',
-                                'text-tudi-lime-700' => $resumenCierre['deficit_diario'] >= 0,
-                                'text-tudi-amber-ink' => $resumenCierre['deficit_diario'] < 0,
-                            ])>{{ $kcal($resumenCierre['deficit_diario']) }}</span>
-                            <span class="tudi-meta">
-                                kcal
-                                @if ($resumenCierre['calorias_actividad_ajustada'] > 0)
-                                    · {{ __('incluye :kcal de actividad', ['kcal' => $kcal($resumenCierre['calorias_actividad_ajustada'])]) }}
-                                @endif
-                            </span>
-                        </span>
-                    </div>
-                </div>
+                <x-tudi.resultado-dia :resumen="$resumenCierre" :cerrado="$registroDiario->cerrado" class="mt-5" />
 
                 @unless ($registroDiario->cerrado)
                     {{--
@@ -880,41 +807,7 @@
                                 @endif
                             </p>
                         @else
-                            <p class="mt-2 text-sm text-tudi-ink-3">
-                                {{ __('Todavía no hay historial suficiente para sugerirte un ajuste.') }}
-                            </p>
-
-                            <ul class="mt-3 space-y-2">
-                                @foreach ([
-                                    [
-                                        'hecho' => $diagnosticoRecomendaciones['historial_completo'],
-                                        'texto' => __('Días con plan en la última semana'),
-                                        'cifra' => $diagnosticoRecomendaciones['dias_con_datos'].' / '.$diagnosticoRecomendaciones['dias_necesarios'],
-                                    ],
-                                    [
-                                        'hecho' => $diagnosticoRecomendaciones['dias_con_peso'] > 0,
-                                        'texto' => __('Pesajes en la última semana'),
-                                        'cifra' => (string) $diagnosticoRecomendaciones['dias_con_peso'],
-                                    ],
-                                    [
-                                        'hecho' => $diagnosticoRecomendaciones['dias_con_peso_anterior'] > 0,
-                                        'texto' => __('Pesajes en la semana anterior'),
-                                        'cifra' => (string) $diagnosticoRecomendaciones['dias_con_peso_anterior'],
-                                    ],
-                                ] as $requisito)
-                                    <li class="flex items-center justify-between gap-3 text-sm">
-                                        <span class="flex items-center gap-2.5">
-                                            <span @class([
-                                                'h-2 w-2 flex-none rounded-full',
-                                                'bg-tudi-lime' => $requisito['hecho'],
-                                                'bg-tudi-input-border' => ! $requisito['hecho'],
-                                            ])></span>
-                                            {{ $requisito['texto'] }}
-                                        </span>
-                                        <span class="tudi-meta">{{ $requisito['cifra'] }}</span>
-                                    </li>
-                                @endforeach
-                            </ul>
+                            <x-tudi.diagnostico-checklist :diagnostico="$diagnosticoRecomendaciones" />
                         @endif
                     @else
                         <ul class="mt-3 space-y-4">

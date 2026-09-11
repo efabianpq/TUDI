@@ -45,7 +45,7 @@ Referencia funcional completa: `Arquitectura_TUDeficit_Inteligente.docx` (si est
 | Cierre diario | `app/Services/DailyClosureService.php`, `app/Console/Commands/RunDailyClosure.php` (`dailyAt('00:15')`) |
 | Motor de recomendaciones | `app/Services/RulesEngineService.php`, `app/Http/Controllers/RecomendacionSistemaController.php` |
 | Analítica de tendencias | `app/Services/TrendAnalyticsService.php`, `app/Services/SeguimientoService.php`, `app/Console/Commands/CalculateTrends.php` (`dailyAt('00:30')`) |
-| Inicio (dashboard) | `app/Http/Controllers/DashboardController.php` |
+| Inicio (dashboard) | `app/Http/Controllers/DashboardController.php`, `app/Services/DashboardEstadoService.php` |
 | Dictado por voz | `resources/js/tudi/dictado.js` (reconocimiento nativo, camino normal); plan B apagado por defecto: `app/Services/AI/TranscripcionAudioProviderInterface.php` + `OpenAiTranscripcionProvider.php`, `app/Http/Controllers/TranscripcionController.php` |
 | Consola de administración | `app/Http/Controllers/Admin/UsuarioController.php` + `ParametroMaestroController.php` + `RecursoDidacticoController.php`, `app/Http/Middleware/EnsureEsAdministrador.php` |
 | Parámetros maestros | `app/Services/ParametrosMaestrosService.php`, `app/Models/ParametroMaestro.php` |
@@ -192,14 +192,26 @@ Un día cerrado es inmutable: `ComidaReal`/`ActividadFisica` nuevas se rechazan,
 
 ### 5.8 Inicio (`/dashboard`)
 
-`DashboardController`, tres bloques:
+`DashboardController` es de solo composición: pide el estado completo a `DashboardEstadoService::calcular()` y lo pasa a la vista sin tocarlo. **Qué sub-estado corresponde en cada bloque lo decide ese servicio, nunca la vista ni el controlador** — cada combinación es un caso de borde cubierto por `tests/Unit/DashboardEstadoServiceTest.php`, sin necesidad de levantar una petición HTTP. Cinco bloques:
 
-0. **Avisos** — el estado del plan (sección 5.18) y, si ayer quedó alguna comida sin reportar, una línea con el enlace para completarla (sección 5.24).
-1. **Hoy** — anillo de déficit (`--pct` = consumidas / (objetivo + actividad), acotado 0–100; un superávit se pinta en crema, no en lima, con la etiqueta "kcal por encima"), estado de las tres comidas, botón para abrir/crear el plan de hoy.
-2. **Tu tendencia** — promedio móvil de peso + % semanal, déficit promedio, racha de días seguidos cerrados (sección 5.23), gráfico Chart.js (si el CDN no carga, las cifras server-rendered siguen ahí).
-3. **Tu seguimiento** — seis semanas con adherencia/comidas/peso medio/variación/déficit, e historial de recomendaciones con sus botones Confirmar/Rechazar.
+- **0. Avisos** — el estado del plan (sección 5.18) y, si ayer quedó alguna comida sin reportar, una línea con el enlace para completarla (sección 5.24). Se pintan siempre, incluso en el primer login.
+- **1. Bienvenida** — solo cuando el usuario no tiene **ningún** `RegistroDiario` todavía: sustituye enteros a los bloques 2-4 con un único mensaje y una sola acción, para no enseñar un anillo en 0%, un gráfico sin puntos o una tabla en blanco justo en el peor momento para desmotivar a quien recién llega. CTA a la Calculadora si además le faltan parámetros base; si no, CTA a "Crear tu primer plan de hoy".
+- **2. Hoy** — tres sub-estados sobre el `RegistroDiario` de hoy, más el caso transversal de parámetros incompletos (mismo mensaje que antes, con CTA a la Calculadora):
+  - *Sin plan* — usuario recurrente que no ha abierto el día: tarjeta simple con botón "Generar plan de hoy".
+  - *En curso* — el mismo anillo de progreso de siempre (`--pct` = consumidas / (objetivo + actividad), acotado 0–100), pero la cifra protagonista es **lo que queda** (`MealDistributionService::saldoDelDia()`, sección 5.21: "Te quedan/Te pasaste por X kcal para [comidas pendientes]"), no un "déficit" — ese sustantivo de resultado solo se gana con el día cerrado (regla transversal más abajo). Debajo, el estado de las tres comidas y el enlace al plan.
+  - *Cerrado* — la tarjeta "Resultado real del día" (`x-tudi.resultado-dia`, sección 5.5) sobre el snapshot congelado de `DailyClosureService::resumen()`, con enlace a "Ver el detalle del día". Sin anillo: el día ya terminó.
+- **3. Tu tendencia** — depende de `datos_suficientes` (`TrendAnalyticsService::calcular()`, ventana de 7 días):
+  - *Insuficiente* — el mismo checklist que ya usa el cierre del plan diario (`x-tudi.diagnostico-checklist`, alimentado por `TrendAnalyticsService::diagnosticoRecomendaciones()`, que ya no depende de un `RegistroDiario` concreto). Nunca un gráfico vacío ni un promedio con un solo dato.
+  - *Suficiente* — dos tarjetas separadas a propósito, nunca fundidas en una cifra: "Último peso registrado" (el pesaje real más reciente, `TrendAnalyticsService::ultimoPesoRegistrado()`, con fecha relativa) y "Tendencia · media 7 días" (el promedio móvil + % semanal, con una aclaración de una línea de que no es el peso de hoy). Debajo, un sparkline de puntos con los pesajes reales (`serieHistorica()`, que ahora también expone `peso_kg` crudo por día sin rellenar huecos), déficit promedio de 7 días, racha de días cerrados seguidos (sección 5.23) y el gráfico Chart.js del promedio móvil (si el CDN no carga, las cifras server-rendered siguen ahí).
+- **4. Tu seguimiento** — depende de si ya pasó una semana natural completa desde el primer `RegistroDiario` del usuario (`SeguimientoService::primerDiaRegistrado()`; "completa" es contra el calendario, no contra la adherencia — basta que hayan pasado los 7 días naturales, aunque no se hayan cerrado todos):
+  - *Incompleta* — un mensaje breve con la fecha en la que tendrá sentido volver a mirarla, sin tabla en blanco.
+  - *Completa* — las seis semanas (una en el plan Gratis) con adherencia/comidas/peso medio/variación/déficit, y debajo "Ajustes de tu objetivo": el historial de recomendaciones con sus botones Confirmar/Rechazar (antes era una sección aparte; vive aquí porque ambas cuentan la misma historia de varias semanas).
 
 `/progreso` es un `Route::redirect` a `/dashboard` (pantalla ya fusionada, se conserva el enlace).
+
+**Regla transversal de honestidad de datos:** ningún bloque muestra una cifra como definitiva antes de que su condición de cierre se cumpla (día cerrado, semana natural completa, 7 días de historial). Mientras no se cumpla, el texto usa "te queda"/"vas en"/"todavía no", nunca un sustantivo de resultado — es la razón por la que el bloque Hoy en curso dejó de decir "Déficit de hoy".
+
+**Reutilizar, no duplicar:** la tarjeta "Resultado real del día" (`x-tudi.resultado-dia`) y el checklist de diagnóstico (`x-tudi.diagnostico-checklist`) son componentes Blade compartidos entre el cierre del plan diario (`planes/show.blade.php`) e Inicio — un solo sitio que pintar, dos pantallas que lo usan. La ficha de "Hoy en curso", en cambio, **no** se comparte con el plan diario: el plan diario nunca mostró un anillo de progreso (solo el panel "Objetivo del día" con el saldo en barras), así que se construyó como partial propio de Inicio (`resources/views/dashboard/partials/hoy.blade.php`) reutilizando los mismos servicios de dominio (`DailyClosureService::resumen()`, `MealDistributionService::saldoDelDia()`) en vez de la vista del plan diario — decisión documentada aquí por si en el futuro se unifica también la presentación.
 
 ### 5.9 Dictado por voz
 

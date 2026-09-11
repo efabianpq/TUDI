@@ -208,7 +208,13 @@ class TrendAnalyticsService
      * días. Se resuelve con una sola consulta y las ventanas se recortan en
      * memoria, en vez de N consultas o una función de ventana SQL.
      *
-     * @return array<int, array{fecha: string, promedio_movil_peso_kg: float|null, indice_consistencia_pct: float}>
+     * `peso_kg` es el pesaje real de ESE día concreto (null si no se pesó),
+     * a diferencia de `promedio_movil_peso_kg` que es el promedio de su
+     * ventana: el primero alimenta el sparkline de pesajes reales de Inicio
+     * (sección 5.8), el segundo la curva de tendencia. Ninguno de los dos
+     * rellena los días sin dato.
+     *
+     * @return array<int, array{fecha: string, peso_kg: float|null, promedio_movil_peso_kg: float|null, indice_consistencia_pct: float}>
      */
     public function serieHistorica(User $usuario, int $dias = 30, ?Carbon $fechaCorte = null): array
     {
@@ -216,21 +222,78 @@ class TrendAnalyticsService
         $dias = max(1, $dias);
 
         $registros = $this->registrosEntre($usuario, $corte->copy()->subDays($dias + self::DIAS_VENTANA - 2), $corte);
+        $porFecha = $registros->keyBy(fn (RegistroDiario $registro): string => $registro->fecha->toDateString());
 
         $serie = [];
 
         for ($i = $dias - 1; $i >= 0; $i--) {
             $dia = $corte->copy()->subDays($i);
             $ventana = $this->ventana($registros, $dia);
+            $registroDelDia = $porFecha->get($dia->toDateString());
 
             $serie[] = [
                 'fecha' => $dia->toDateString(),
+                'peso_kg' => $registroDelDia?->peso_kg !== null ? (float) $registroDelDia->peso_kg : null,
                 'promedio_movil_peso_kg' => $this->promedio($ventana, 'peso_kg'),
                 'indice_consistencia_pct' => $this->indiceConsistencia($ventana->where('cerrado', true)->count()),
             ];
         }
 
         return $serie;
+    }
+
+    /**
+     * El pesaje real más reciente del usuario (nunca el promedio móvil), con
+     * su fecha — lo que la tarjeta "Último peso registrado" de Inicio compara
+     * contra la báscula de esta mañana (sección 5.8). Null si nunca ha
+     * apuntado un peso.
+     *
+     * @return array{peso_kg: float, fecha: Carbon}|null
+     */
+    public function ultimoPesoRegistrado(User $usuario): ?array
+    {
+        $registro = RegistroDiario::where('usuario_id', $usuario->id)
+            ->whereNotNull('peso_kg')
+            ->orderByDesc('fecha')
+            ->first();
+
+        if ($registro === null) {
+            return null;
+        }
+
+        return [
+            'peso_kg' => (float) $registro->peso_kg,
+            'fecha' => $registro->fecha,
+        ];
+    }
+
+    /**
+     * Por qué el motor de recomendaciones tiene (o no) algo que decir en
+     * $fechaCorte: el mismo checklist que usa el cierre de un día concreto
+     * (DailyClosureService::diagnosticoRecomendaciones), pero sin depender de
+     * un RegistroDiario — así también lo puede pintar Inicio, que no siempre
+     * tiene un plan de hoy (sección 5.8).
+     *
+     * @return array{dias_con_datos: int, dias_necesarios: int, dias_cerrados: int, dias_con_peso: int, dias_con_peso_anterior: int, historial_completo: bool, comparacion_de_peso_lista: bool, listo: bool, ritmo_pct: float|null}
+     */
+    public function diagnosticoRecomendaciones(User $usuario, ?Carbon $fechaCorte = null): array
+    {
+        $tendencia = $this->calcular($usuario, $fechaCorte);
+
+        $historialCompleto = $tendencia['datos_suficientes'];
+        $comparacionLista = $tendencia['porcentaje_perdida_semanal'] !== null;
+
+        return [
+            'dias_con_datos' => $tendencia['dias_con_datos'],
+            'dias_necesarios' => self::DIAS_VENTANA,
+            'dias_cerrados' => $tendencia['dias_cerrados'],
+            'dias_con_peso' => $tendencia['dias_con_peso'],
+            'dias_con_peso_anterior' => $tendencia['dias_con_peso_anterior'],
+            'historial_completo' => $historialCompleto,
+            'comparacion_de_peso_lista' => $comparacionLista,
+            'listo' => $historialCompleto && $comparacionLista,
+            'ritmo_pct' => $tendencia['porcentaje_perdida_semanal'],
+        ];
     }
 
     /**

@@ -71,6 +71,21 @@ class SeguimientoService
     }
 
     /**
+     * La fecha del RegistroDiario más antiguo del usuario, o null si nunca
+     * tuvo ninguno. Es lo que decide si ya pasó una semana completa desde que
+     * empezó a usar la app: sin eso, "Tu seguimiento" mostraría un puñado de
+     * semanas casi vacías desde el segundo día de uso (sección 5.8).
+     */
+    public function primerDiaRegistrado(User $usuario): ?Carbon
+    {
+        $registro = RegistroDiario::where('usuario_id', $usuario->id)
+            ->orderBy('fecha')
+            ->first();
+
+        return $registro?->fecha;
+    }
+
+    /**
      * Historial de lo que el sistema le ha propuesto al usuario y qué hizo con
      * cada propuesta — el rastro de cómo se ha ido moviendo su objetivo.
      *

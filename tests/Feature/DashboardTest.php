@@ -8,9 +8,14 @@ use App\Models\RegistroDiario;
 use App\Models\User;
 
 /**
- * Inicio: la pantalla que fusiona el antiguo dashboard con "Mi progreso"
- * (CLAUDE.md sección 4.17). Tres alturas de mirada: hoy, la tendencia de 7
- * días, y el seguimiento semanal con el historial de ajustes.
+ * Inicio: cuatro bloques, cada uno con sus propios sub-estados según cuánto
+ * ha usado la app el usuario (CLAUDE.md sección 5.8).
+ *
+ *  0. Avisos          — sin cambios: plan y comidas de ayer sin reportar.
+ *  1. Bienvenida      — solo en el primer login, sin ningún RegistroDiario.
+ *  2. Hoy             — sin plan / en curso / cerrado.
+ *  3. Tu tendencia    — historial insuficiente / suficiente.
+ *  4. Tu seguimiento  — sin semana completa / con datos.
  *
  * Same profile as tests/Feature/CierreDiarioTest.php:
  * objetivo = 80 * 22 * 1.5 * 0.8 = 2112 kcal.
@@ -30,12 +35,72 @@ function usuarioParaDashboard(array $sobrescribir = []): User
     ], $sobrescribir));
 }
 
+/**
+ * Siete días de historial cerrado (días 1 a 7 hacia atrás), lo mínimo para que
+ * "Tu tendencia" y "Tu seguimiento" salgan de su sub-estado inicial. Deja
+ * libre el día de hoy para que cada test construya su propio caso.
+ */
+function historialDeUnaSemana(User $usuario): void
+{
+    foreach (range(1, 7) as $atras) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'peso_kg' => 80.0,
+        ]);
+    }
+}
+
 it('exige autenticación para ver el inicio', function () {
     $this->get(route('dashboard'))->assertRedirect(route('login'));
 });
 
-it('muestra el resumen de hoy, el estado de las comidas, las tendencias y las recomendaciones pendientes', function () {
+/*
+|--------------------------------------------------------------------------
+| Bloque 1 — Bienvenida (primer login, sin ningún RegistroDiario)
+|--------------------------------------------------------------------------
+*/
+
+it('en el primer login sin parámetros, invita a la Calculadora', function () {
+    $usuario = User::factory()->create(['peso_kg' => null, 'nivel_actividad' => null]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Bienvenido a TUDéficit Inteligente')
+        ->assertSee(route('calculadora.edit'))
+        ->assertDontSee('Tu tendencia')
+        ->assertDontSee('Tu seguimiento');
+});
+
+it('en el primer login con parámetros ya completos, invita a crear el primer plan', function () {
     $usuario = usuarioParaDashboard();
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Bienvenido a TUDéficit Inteligente')
+        ->assertSee('Crear tu primer plan de hoy')
+        ->assertDontSee('Tu tendencia')
+        ->assertDontSee('Tu seguimiento');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Bloque 2 — Hoy
+|--------------------------------------------------------------------------
+*/
+
+it('Hoy: sin plan para un usuario recurrente que todavía no abrió el día', function () {
+    $usuario = usuarioParaDashboard();
+    historialDeUnaSemana($usuario);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Todavía no has creado el plan de hoy.')
+        ->assertSee('Generar plan de hoy');
+});
+
+it('Hoy: en curso muestra lo que queda del día, no un déficit todavía sin cerrar', function () {
+    $usuario = usuarioParaDashboard();
+    historialDeUnaSemana($usuario);
 
     $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
         'fecha' => now()->toDateString(),
@@ -64,37 +129,80 @@ it('muestra el resumen de hoy, el estado de las comidas, las tendencias y las re
         'calorias_ajustadas' => 340,
     ]);
 
-    $recomendacion = RecomendacionSistema::factory()->for($registroDiario, 'registroDiario')->create([
-        'tipo' => 'ajuste_calorico',
-        'calorias_objetivo_sugeridas' => 1950,
-        'justificacion' => 'Pérdida semanal por debajo del 0.5%: se sugiere reducir el objetivo.',
-        'estado' => 'pendiente',
-        'confirmada_en' => null,
-    ]);
-
     $respuesta = $this->actingAs($usuario)->get(route('dashboard'));
 
-    // objetivo 2112 · consumidas 600 · actividad 340 · déficit 2112-600+340 = 1852
+    // objetivo 2112 · consumidas 600 · actividad 340.
+    // Saldo de calorías (objetivo - consumido, sección 5.21) = 2112 - 600 = 1512.
     $respuesta->assertOk()
         ->assertSee('2.112')   // calorías objetivo
         ->assertSee('600')     // calorías consumidas
         ->assertSee('340')     // gasto por actividad ajustado
-        ->assertSee('1.852')   // déficit estimado
-        ->assertSee('desayuno')
+        ->assertSee('Te quedan')
+        ->assertSee('1.512')   // saldo de calorías que aún quedan del día
         ->assertSee('almuerzo')
+        ->assertSee('cena')
+        ->assertDontSee('Déficit de hoy')
+        ->assertSee('desayuno')
         ->assertSee('registrada')
         ->assertSee('planificada')
         ->assertSee('pendiente')
-        ->assertSee('Abrir el plan de hoy')
-        ->assertSee($recomendacion->justificacion)
-        ->assertSee('grafico-peso')
-        ->assertSee('chart.js', false);
+        ->assertSee('Abrir el plan de hoy');
 });
 
-it('absorbe lo que antes era "Mi progreso": promedios móviles, consistencia y gráfico', function () {
+it('Hoy: cerrado muestra el resultado real del día, no el anillo de progreso', function () {
+    $usuario = usuarioParaDashboard();
+    historialDeUnaSemana($usuario);
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+        'fecha' => now()->toDateString(),
+        'calorias_objetivo_dia' => 2112,
+        'calorias_consumidas' => 1800,
+        'calorias_actividad_ajustada' => 0,
+        'deficit_diario' => 312,
+        'proteina_objetivo_g' => 160,
+        'proteina_consumida_g' => 140,
+    ]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Resultado real del día')
+        ->assertSee('Ver el detalle del día')
+        ->assertDontSee('Abrir el plan de hoy');
+});
+
+it('muestra un aviso cuando faltan parámetros nutricionales en vez de fallar con un 500', function () {
+    $usuario = usuarioParaDashboard(['proteina_factor' => null]);
+    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => now()->toDateString()]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Completa tus parámetros nutricionales para ver el resumen de hoy.');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Bloque 3 — Tu tendencia
+|--------------------------------------------------------------------------
+*/
+
+it('Tu tendencia: con menos de 7 días muestra el checklist, nunca un gráfico vacío', function () {
     $usuario = usuarioParaDashboard();
 
-    // Siete días cerrados con peso y déficit conocidos.
+    // Solo 2 días de historial: ni de lejos la ventana de 7 que exige la sección 6.
+    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => now()->toDateString(), 'peso_kg' => 80]);
+    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => now()->subDay()->toDateString(), 'peso_kg' => 79.8]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Todavía no hay historial suficiente para sugerirte un ajuste.')
+        ->assertSee('Días con plan en la última semana')
+        ->assertDontSee('grafico-peso')
+        ->assertDontSee('Racha');
+});
+
+it('Tu tendencia: con 7 días muestra el último peso real y el promedio, por separado', function () {
+    $usuario = usuarioParaDashboard();
+
     foreach (range(0, 6) as $dias) {
         RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
             'fecha' => now()->subDays($dias)->toDateString(),
@@ -106,11 +214,54 @@ it('absorbe lo que antes era "Mi progreso": promedios móviles, consistencia y g
 
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
-        ->assertSee('Peso · media 7 días')
+        ->assertSee('Último peso registrado')
+        ->assertSee('Tendencia · media 7 días')
         ->assertSee('80,00 kg')
         ->assertSee('Déficit promedio')
         ->assertSee('Racha')
-        ->assertSee('7 de 7 días cerrados');
+        ->assertSee('7 de 7 días cerrados')
+        ->assertSee('grafico-peso')
+        ->assertSee('grafico-peso-real')
+        ->assertSee('chart.js', false);
+});
+
+it('muestra la racha de días seguidos cerrados', function () {
+    $usuario = usuarioParaDashboard();
+
+    // Ventana completa de 7 días (datos_suficientes), con una racha de 3
+    // días cerrados que empieza ayer: hoy queda libre (día en curso).
+    foreach (range(0, 6) as $atras) {
+        $cerrado = in_array($atras, [1, 2, 3], true);
+
+        RegistroDiario::factory()->for($usuario, 'usuario')->create([
+            'fecha' => now()->subDays($atras)->toDateString(),
+            'cerrado' => $cerrado,
+            'cerrado_en' => $cerrado ? now()->subDays($atras) : null,
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertViewHas('tendencia', fn ($tendencia) => $tendencia['suficiente'] === true && $tendencia['racha'] === 3)
+        ->assertSee('días seguidos');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Bloque 4 — Tu seguimiento
+|--------------------------------------------------------------------------
+*/
+
+it('Tu seguimiento: sin una semana completa desde el primer día, no muestra la tabla en blanco', function () {
+    $usuario = usuarioParaDashboard();
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => now()->subDays(2)->toDateString()]);
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Todavía no hay una semana completa.')
+        ->assertDontSee('Adherencia')
+        ->assertDontSee('Historial');
 });
 
 it('resume el seguimiento semana a semana a partir de los planes diarios', function () {
@@ -145,9 +296,11 @@ it('resume el seguimiento semana a semana a partir de los planes diarios', funct
 
 it('muestra el historial de ajustes propuestos y su estado', function () {
     $usuario = usuarioParaDashboard();
-    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
-        'fecha' => now()->subDays(3)->toDateString(),
-    ]);
+    historialDeUnaSemana($usuario);
+
+    $registroDiario = RegistroDiario::where('usuario_id', $usuario->id)
+        ->whereDate('fecha', now()->subDays(3)->toDateString())
+        ->firstOrFail();
 
     RecomendacionSistema::factory()->for($registroDiario, 'registroDiario')->create([
         'tipo' => 'ajuste_calorico',
@@ -181,24 +334,6 @@ it('confirmar una recomendación desde el inicio vuelve al inicio', function () 
     expect($recomendacion->fresh()->estado)->toBe('confirmada');
 });
 
-it('muestra un aviso cuando faltan parámetros nutricionales en vez de fallar con un 500', function () {
-    $usuario = usuarioParaDashboard(['proteina_factor' => null]);
-    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => now()->toDateString()]);
-
-    $this->actingAs($usuario)->get(route('dashboard'))
-        ->assertOk()
-        ->assertSee('Completa tus parámetros nutricionales para ver el resumen de hoy.');
-});
-
-it('no falla para un usuario sin nada registrado hoy', function () {
-    $usuario = usuarioParaDashboard();
-
-    $this->actingAs($usuario)->get(route('dashboard'))
-        ->assertOk()
-        ->assertSee('Todavía no has creado el plan de hoy.')
-        ->assertSee('No tienes recomendaciones pendientes.');
-});
-
 it('no mezcla las recomendaciones o el resumen de otro usuario', function () {
     $usuario = usuarioParaDashboard();
     $otro = usuarioParaDashboard();
@@ -225,26 +360,9 @@ it('redirige "Mi progreso" al inicio para no romper enlaces guardados', function
 
 /*
 |--------------------------------------------------------------------------
-| Racha y aviso de comidas sin reportar (CLAUDE.md secciones 5.23 y 5.24)
+| Aviso de comidas sin reportar (CLAUDE.md sección 5.24)
 |--------------------------------------------------------------------------
 */
-
-it('muestra la racha de días seguidos cerrados', function () {
-    $usuario = usuarioParaDashboard();
-
-    foreach ([1, 2, 3] as $atras) {
-        RegistroDiario::factory()->for($usuario, 'usuario')->create([
-            'fecha' => now()->subDays($atras)->toDateString(),
-            'cerrado' => true,
-            'cerrado_en' => now()->subDays($atras),
-        ]);
-    }
-
-    $this->actingAs($usuario)->get(route('dashboard'))
-        ->assertOk()
-        ->assertViewHas('racha', 3)
-        ->assertSee('días seguidos');
-});
 
 it('avisa de las comidas que quedaron sin reportar ayer, con enlace para completarlas', function () {
     $usuario = usuarioParaDashboard();

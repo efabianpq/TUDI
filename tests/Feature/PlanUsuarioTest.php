@@ -314,19 +314,31 @@ it('el motor de recomendaciones solo corre con Premium', function (string $plan,
 
 it('recorta el seguimiento en el plan Gratis y lo devuelve entero con Premium', function () {
     $gratis = usuarioConPerfil(['plan' => User::PLAN_GRATIS]);
+    // Una semana natural completa: sin ella "Tu seguimiento" muestra el
+    // mensaje de espera en vez de la tabla (CLAUDE.md sección 5.8).
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($gratis, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+        ]);
+    }
 
     $this->actingAs($gratis)->get(route('dashboard'))
         ->assertOk()
         ->assertViewHas('premium', false)
-        ->assertViewHas('semanas', fn (array $semanas): bool => count($semanas) === 1)
+        ->assertViewHas('seguimiento', fn (array $seguimiento): bool => count($seguimiento['semanas']) === 1)
         ->assertSee('El motor de ajustes es parte de Premium. Tus cifras se siguen guardando.');
 
     $premium = usuarioConPerfil();
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($premium, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+        ]);
+    }
 
     $this->actingAs($premium)->get(route('dashboard'))
         ->assertOk()
         ->assertViewHas('premium', true)
-        ->assertViewHas('semanas', fn (array $semanas): bool => count($semanas) === 6);
+        ->assertViewHas('seguimiento', fn (array $seguimiento): bool => count($seguimiento['semanas']) === 6);
 });
 
 it('avisa en Inicio de los días de prueba que quedan, sin bloquear nada', function () {

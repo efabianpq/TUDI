@@ -142,22 +142,7 @@ class DailyClosureService
      */
     public function diagnosticoRecomendaciones(RegistroDiario $registroDiario): array
     {
-        $tendencia = $this->analiticaTendencias->calcular($registroDiario->usuario, $registroDiario->fecha);
-
-        $historialCompleto = $tendencia['datos_suficientes'];
-        $comparacionLista = $tendencia['porcentaje_perdida_semanal'] !== null;
-
-        return [
-            'dias_con_datos' => $tendencia['dias_con_datos'],
-            'dias_necesarios' => TrendAnalyticsService::DIAS_VENTANA,
-            'dias_cerrados' => $tendencia['dias_cerrados'],
-            'dias_con_peso' => $tendencia['dias_con_peso'],
-            'dias_con_peso_anterior' => $tendencia['dias_con_peso_anterior'],
-            'historial_completo' => $historialCompleto,
-            'comparacion_de_peso_lista' => $comparacionLista,
-            'listo' => $historialCompleto && $comparacionLista,
-            'ritmo_pct' => $tendencia['porcentaje_perdida_semanal'],
-        ];
+        return $this->analiticaTendencias->diagnosticoRecomendaciones($registroDiario->usuario, $registroDiario->fecha);
     }
 
     /**

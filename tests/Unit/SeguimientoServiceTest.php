@@ -77,6 +77,28 @@ it('resume cada semana con su adherencia, su peso medio y su déficit medio', fu
         ->and($semanas[1]['promedio_peso_kg'])->toBe(81.0);
 });
 
+/*
+|--------------------------------------------------------------------------
+| Primer día registrado (CLAUDE.md sección 5.8)
+|--------------------------------------------------------------------------
+*/
+
+it('el primer día registrado es null sin ningún RegistroDiario', function () {
+    expect(app(SeguimientoService::class)->primerDiaRegistrado(usuarioDelSeguimiento()))->toBeNull();
+});
+
+it('el primer día registrado es el más antiguo, aunque se haya creado después que otros', function () {
+    $usuario = usuarioDelSeguimiento();
+
+    diaDelSeguimiento($usuario, 2);
+    diaDelSeguimiento($usuario, 10);
+    diaDelSeguimiento($usuario, 5);
+
+    $primerDia = app(SeguimientoService::class)->primerDiaRegistrado($usuario);
+
+    expect($primerDia->toDateString())->toBe(corteDelSeguimiento()->copy()->subDays(10)->toDateString());
+});
+
 it('divide la adherencia entre los 7 días naturales, no entre los días con plan', function () {
     $usuario = usuarioDelSeguimiento();
 

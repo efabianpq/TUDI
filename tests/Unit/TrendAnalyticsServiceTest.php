@@ -424,6 +424,94 @@ it('omite una variación semanal cuando falta el promedio de una de las dos sema
 
 /*
 |--------------------------------------------------------------------------
+| Último peso real registrado (CLAUDE.md sección 5.8)
+|--------------------------------------------------------------------------
+*/
+
+it('el último peso registrado es null sin ningún RegistroDiario con peso', function () {
+    $usuario = User::factory()->create();
+
+    RegistroDiario::factory()->for($usuario, 'usuario')->create(['fecha' => corteDePrueba()->toDateString(), 'peso_kg' => null]);
+
+    expect(app(TrendAnalyticsService::class)->ultimoPesoRegistrado($usuario))->toBeNull();
+});
+
+it('el último peso registrado es el pesaje real más reciente, no el promedio móvil', function () {
+    $usuario = User::factory()->create();
+
+    diaConPeso($usuario, 5, 82.0);
+    diaConPeso($usuario, 2, 81.0);
+    diaConPeso($usuario, 0, 80.4);
+
+    $ultimo = app(TrendAnalyticsService::class)->ultimoPesoRegistrado($usuario);
+
+    expect($ultimo['peso_kg'])->toEqualWithDelta(80.4, 0.0001)
+        ->and($ultimo['fecha']->toDateString())->toBe(corteDePrueba()->toDateString());
+});
+
+it('el último peso registrado ignora los días sin peso más recientes que el último pesaje real', function () {
+    $usuario = User::factory()->create();
+
+    diaConPeso($usuario, 2, 79.0);
+    diaConPeso($usuario, 0, null);
+
+    expect(app(TrendAnalyticsService::class)->ultimoPesoRegistrado($usuario)['peso_kg'])->toEqualWithDelta(79.0, 0.0001);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Serie histórica: pesajes reales, sin rellenar huecos (CLAUDE.md sección 5.8)
+|--------------------------------------------------------------------------
+*/
+
+it('la serie histórica expone el pesaje real de cada día por separado del promedio móvil', function () {
+    $usuario = User::factory()->create();
+
+    diaConPeso($usuario, 1, 80.6);
+    // El día de corte se queda sin pesaje.
+
+    $serie = app(TrendAnalyticsService::class)->serieHistorica($usuario, 2, corteDePrueba());
+
+    expect($serie[0]['fecha'])->toBe(corteDePrueba()->copy()->subDay()->toDateString())
+        ->and($serie[0]['peso_kg'])->toEqualWithDelta(80.6, 0.0001)
+        ->and($serie[1]['peso_kg'])->toBeNull();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Diagnóstico de recomendaciones sin depender de un RegistroDiario (sección 5.8)
+|--------------------------------------------------------------------------
+*/
+
+it('el diagnóstico de recomendaciones no está listo con menos de 7 días de historial', function () {
+    $usuario = User::factory()->create();
+
+    diaConPeso($usuario, 0, 80.0);
+
+    $diagnostico = app(TrendAnalyticsService::class)->diagnosticoRecomendaciones($usuario, corteDePrueba());
+
+    expect($diagnostico['dias_con_datos'])->toBe(1)
+        ->and($diagnostico['dias_necesarios'])->toBe(7)
+        ->and($diagnostico['historial_completo'])->toBeFalse()
+        ->and($diagnostico['listo'])->toBeFalse();
+});
+
+it('el diagnóstico de recomendaciones se da por listo con siete días y un pesaje en cada semana', function () {
+    $usuario = User::factory()->create();
+
+    foreach (range(0, 13) as $atras) {
+        diaConPeso($usuario, $atras, in_array($atras, [0, 10], true) ? 80.0 : null);
+    }
+
+    $diagnostico = app(TrendAnalyticsService::class)->diagnosticoRecomendaciones($usuario, corteDePrueba());
+
+    expect($diagnostico['historial_completo'])->toBeTrue()
+        ->and($diagnostico['listo'])->toBeTrue()
+        ->and($diagnostico['ritmo_pct'])->not->toBeNull();
+});
+
+/*
+|--------------------------------------------------------------------------
 | Racha de días cerrados (CLAUDE.md sección 5.23)
 |--------------------------------------------------------------------------
 */

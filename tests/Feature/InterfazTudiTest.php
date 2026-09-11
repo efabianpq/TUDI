@@ -70,7 +70,9 @@ it('muestra el déficit del día como anillo de progreso, no como tabla de cifra
         ->assertOk()
         ->assertSee('tudi-ring', escape: false)
         ->assertSee('--pct: 43', escape: false)
-        ->assertSee('kcal por debajo')
+        // El día sigue abierto: "te quedan", nunca un sustantivo de resultado
+        // como "déficit" (CLAUDE.md sección 5.8).
+        ->assertSee('Te quedan')
         // La tabla de cuatro cifras que había antes ya no está.
         ->assertDontSee('Consumidas / objetivo');
 });
