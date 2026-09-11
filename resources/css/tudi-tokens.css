@@ -249,6 +249,14 @@ a:hover { color: var(--tudi-lime-700); }
 }
 .tudi-tabbar a[aria-current="page"] { color: var(--tudi-ink); font-weight: 600; }
 
+/*
+ * Mientras se escribe, la barra se va (resources/js/tudi/barra-inferior.js):
+ * el teclado encoge el viewport de maquetación y una barra `fixed` anclada a
+ * él sube con el teclado, quedándose flotando a media pantalla. Ocultarla es
+ * lo único que la mantiene "quieta", y de paso devuelve alto útil al campo.
+ */
+.tudi-escribiendo .tudi-tabbar { display: none; }
+
 /* Barra superior fija de móvil: el espejo de .tudi-tabbar (sección 5.12). */
 .tudi-topbar {
   background: var(--tudi-bg);

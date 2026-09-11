@@ -65,6 +65,7 @@ class MealDistributionService
         private readonly NutritionCalculatorService $calculadora,
         private readonly MealDistributionProviderInterface $proveedor,
         private readonly RepartoComidasService $reparto,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -92,8 +93,11 @@ class MealDistributionService
      */
     public function objetivosDelRegistro(RegistroDiario $registroDiario): array
     {
-        return $this->objetivosDelDia(
-            $registroDiario->usuario,
+        // El objetivo SELLADO de ese día, no el que dicte hoy el perfil
+        // (sección 5.25): cambiar la Calculadora no puede reescribir hacia
+        // atrás los objetivos de días que ya se vivieron.
+        return $this->repartir(
+            $this->objetivoDelDia->vigente($registroDiario),
             $this->reparto->paraElDia($registroDiario),
         );
     }
@@ -164,16 +168,18 @@ class MealDistributionService
      */
     public function objetivosDelDia(User $usuario, ?array $reparto = null): array
     {
-        $dia = $this->calculadora->calculatePlan(
-            (float) $usuario->peso_kg,
-            (float) $usuario->nivel_actividad,
-            $usuario->tipo_deficit,
-            (float) $usuario->valor_deficit,
-            (float) $usuario->proteina_factor,
-            (float) $usuario->grasa_factor,
-            $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
-        );
+        return $this->repartir($this->objetivoDelDia->calcularDelUsuario($usuario), $reparto);
+    }
 
+    /**
+     * Parte un objetivo diario entre las comidas según el reparto vigente.
+     *
+     * @param  array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}  $dia
+     * @param  array<string, float>|null  $reparto  proporción por comida; null usa el reparto balanceado de partida
+     * @return array{dia: array{calorias_objetivo: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}, por_comida: array<string, array{calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>, reparto: array<string, float>}
+     */
+    private function repartir(array $dia, ?array $reparto = null): array
+    {
         $reparto ??= $this->reparto->balanceado();
 
         $porComida = [];

@@ -23,6 +23,7 @@ class DailyClosureService
         private readonly NutritionCalculatorService $calculadora,
         private readonly TrendAnalyticsService $analiticaTendencias,
         private readonly RulesEngineService $reglas,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -152,19 +153,15 @@ class DailyClosureService
      */
     private function calcular(RegistroDiario $registroDiario): array
     {
-        $usuario = $registroDiario->usuario;
-
-        $planNutricional = $this->calculadora->calculatePlan(
-            (float) $usuario->peso_kg,
-            (float) $usuario->nivel_actividad,
-            $usuario->tipo_deficit,
-            (float) $usuario->valor_deficit,
-            (float) $usuario->proteina_factor,
-            (float) $usuario->grasa_factor,
-            // The target in force, which a confirmed RecomendacionSistema may
-            // have moved away from the raw formula (CLAUDE.md section 4.10).
-            $usuario->calorias_objetivo !== null ? (float) $usuario->calorias_objetivo : null,
-        );
+        /*
+         * El objetivo SELLADO de este día (CLAUDE.md sección 5.25), no el que
+         * dicte hoy el perfil: un día pasado que sigue abierto se planificó y
+         * se reportó contra el objetivo que tenía entonces, y tocar la
+         * Calculadora no puede reescribirlo hacia atrás. Para los días
+         * heredados, sin sello, `vigente()` cae al perfil vigente, que es el
+         * comportamiento que había antes.
+         */
+        $planNutricional = $this->objetivoDelDia->vigente($registroDiario);
 
         $comidasReales = ComidaReal::whereIn(
             'plan_comida_id',

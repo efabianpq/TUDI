@@ -149,7 +149,7 @@ it('Hoy: en curso muestra lo que queda del día, no un déficit todavía sin cer
         ->assertSee('Abrir el plan de hoy');
 });
 
-it('Hoy: cerrado muestra el resultado real del día, no el anillo de progreso', function () {
+it('Hoy: cerrado conserva la misma tarjeta principal y solo cambia lo que dicen sus cifras', function () {
     $usuario = usuarioParaDashboard();
     historialDeUnaSemana($usuario);
 
@@ -165,9 +165,44 @@ it('Hoy: cerrado muestra el resultado real del día, no el anillo de progreso', 
 
     $this->actingAs($usuario)->get(route('dashboard'))
         ->assertOk()
-        ->assertSee('Resultado real del día')
+        // La tarjeta no se sustituye por otra: sigue el mismo panel con su anillo.
+        ->assertSee('tudi-ring', escape: false)
+        ->assertSee('cerrado')
+        // Con el día cerrado el déficit ya es un resultado y se llama por su nombre.
+        ->assertSee('Déficit de')
+        ->assertSee('312')
         ->assertSee('Ver el detalle del día')
-        ->assertDontSee('Abrir el plan de hoy');
+        ->assertDontSee('Abrir el plan de hoy')
+        // La tarjeta de cierre es la del plan diario, no la de Inicio.
+        ->assertDontSee('Resultado real del día');
+});
+
+it('Hoy: la tarjeta principal muestra los tres macros, no solo la proteína', function () {
+    $usuario = usuarioParaDashboard();
+
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $desayuno = PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'desayuno',
+    ]);
+
+    ComidaReal::factory()->for($desayuno, 'planComida')->create([
+        'calorias_reales' => 600,
+        'proteina_g' => 45,
+        'grasa_g' => 20,
+        'carbohidratos_g' => 60,
+    ]);
+
+    // Perfil de 80 kg: 160 g de proteína, 64 g de grasa y el resto en carbohidratos.
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Proteína')
+        ->assertSee('Grasas')
+        ->assertSee('Carbohidratos')
+        ->assertSee('45 / 160 g')
+        ->assertSee('20 / 64 g');
 });
 
 it('muestra un aviso cuando faltan parámetros nutricionales en vez de fallar con un 500', function () {

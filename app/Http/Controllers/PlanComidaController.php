@@ -16,6 +16,7 @@ use App\Services\DailyClosureService;
 use App\Services\MealDistributionService;
 use App\Services\MealPlanGeneratorService;
 use App\Services\NutritionCalculatorService;
+use App\Services\ObjetivoDelDiaService;
 use App\Services\PlanDiarioService;
 use App\Services\RepartoComidasService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -66,6 +67,7 @@ class PlanComidaController extends Controller
         private readonly PlanDiarioService $planDiario,
         private readonly CuotaIaService $cuotas,
         private readonly ComidasFrecuentesService $frecuentes,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -93,10 +95,18 @@ class PlanComidaController extends Controller
         $registroDiario = $this->registroDiarioDeHoy($request);
         $yaExistia = $registroDiario !== null;
 
-        $registroDiario ??= RegistroDiario::create([
-            'usuario_id' => $request->user()->id,
-            'fecha' => now()->toDateString(),
-        ]);
+        if (! $yaExistia) {
+            $registroDiario = RegistroDiario::create([
+                'usuario_id' => $request->user()->id,
+                'fecha' => now()->toDateString(),
+            ]);
+
+            // El día nace con su objetivo sellado (sección 5.25): a partir de
+            // aquí es SUYO y un cambio posterior de la Calculadora no lo
+            // reescribe salvo que siga siendo el día de hoy.
+            $registroDiario->setRelation('usuario', $request->user());
+            $this->objetivoDelDia->sellar($registroDiario);
+        }
 
         return Redirect::route('planes.show', $registroDiario)
             ->with('status', $yaExistia ? 'plan-existente' : 'plan-creado');

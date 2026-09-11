@@ -10,6 +10,7 @@ use App\Models\RegistroDiario;
 use App\Models\User;
 use App\Services\DailyClosureService;
 use App\Services\NutritionCalculatorService;
+use App\Services\ObjetivoDelDiaService;
 use App\Services\TrendAnalyticsService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
@@ -371,6 +372,11 @@ class DemoSeeder extends Seeder
                 'ingredientes_almuerzo' => 'pollo, arroz y ensalada',
                 'ingredientes_cena' => 'sopa de verduras con pollo',
             ]);
+
+            // Cada día de la demo nace con su objetivo sellado (sección 5.25),
+            // igual que uno creado desde la aplicación.
+            $registro->setRelation('usuario', $usuario);
+            app(ObjetivoDelDiaService::class)->sellar($registro);
 
             $this->comidasDelDia($registro, $indice, $adherencia);
             $this->actividadDelDia($registro, $indice);

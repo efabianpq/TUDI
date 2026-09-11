@@ -1,8 +1,11 @@
 {{--
-    Bloque 2 — Hoy (CLAUDE.md sección 5.8): tres sub-estados mutuamente
-    excluyentes que decide DashboardEstadoService::calcular() — esta vista
-    solo pinta el que le llega en $hoy['estado'], sin repetir la condición de
-    negocio.
+    Bloque 2 — Hoy (CLAUDE.md sección 5.8).
+
+    La tarjeta principal es SIEMPRE la misma, esté el día abierto o cerrado:
+    mismo panel carbón, mismo anillo, mismos macros, mismas comidas. Cerrar el
+    día no cambia de tarjeta, solo cambia qué dicen sus cifras — sustituirla
+    por un resumen distinto obligaba a reaprender la pantalla justo cuando el
+    usuario acaba de terminar su día.
 --}}
 @php
     $kcal = fn ($valor) => number_format((float) $valor, 0, ',', '.');
@@ -29,50 +32,53 @@
             </button>
         </form>
     </div>
-@elseif ($hoy['estado'] === 'cerrado')
-    {{--
-        Día cerrado: la MISMA tarjeta que usa el cierre del plan diario
-        (DailyClosureService::resumen() sobre un día cerrado es un snapshot
-        congelado, nunca se recalcula desde el perfil actual). Nada de anillo
-        de progreso: el día ya terminó, lo que queda es el resultado.
-    --}}
-    <div class="tudi-card p-5 sm:p-6">
-        <x-tudi.resultado-dia :resumen="$hoy['resumen']" cerrado />
-
-        <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
-           class="tudi-btn tudi-btn-block mt-4 bg-tudi-ink text-tudi-on-dark no-underline">
-            {{ __('Ver el detalle del día') }}
-        </a>
-    </div>
 @else
-    {{--
-        Día en curso. El anillo pasa a ser un indicador compacto con su
-        porcentaje dentro, y la cifra protagonista es la accionable: lo que
-        QUEDA del día (MealDistributionService::saldoDelDia, sección 5.21).
-        "Déficit" es un sustantivo de resultado y solo se gana con el día
-        cerrado (sección 5.8, regla transversal de honestidad).
-    --}}
     @php
         $resumen = $hoy['resumen'];
         $saldo = $hoy['saldo'];
+        $cerrado = $hoy['estado'] === 'cerrado';
 
         $presupuesto = (float) $resumen['calorias_objetivo'] + (float) $resumen['calorias_actividad_ajustada'];
         $avance = $presupuesto > 0
             ? max(0, min(100, round((float) $resumen['calorias_consumidas'] / $presupuesto * 100)))
             : 0;
-        $proteinaPct = max(0, min(100, (float) $resumen['cumplimiento_proteina_pct']));
+
+        /*
+         * Qué dice la cifra protagonista (regla transversal de honestidad,
+         * sección 5.8): con el día abierto, lo que QUEDA —un saldo todavía
+         * puede moverse—; con el día cerrado, el déficit, que ya es un
+         * resultado y por fin se puede llamar por su nombre.
+         */
+        $deficit = (float) $resumen['deficit_diario'];
 
         $pendientesLegible = collect($saldo['comidas_pendientes'] ?? [])
             ->pipe(fn ($lista) => $lista->count() > 1
                 ? $lista->slice(0, -1)->implode(', ').' '.__('y').' '.$lista->last()
                 : $lista->first());
+
+        $enNegativo = $cerrado ? $deficit < 0 : $saldo['agotado'];
+        $cifra = $cerrado ? abs($deficit) : abs($saldo['saldo']['calorias']);
+
+        $rotulo = match (true) {
+            $cerrado && $deficit >= 0 => __('Déficit de'),
+            $cerrado => __('Te pasaste por'),
+            $saldo['agotado'] => __('Te pasaste por'),
+            default => __('Te quedan'),
+        };
+
+        $porcentaje = fn ($parte, $total) => $total > 0 ? max(0, min(100, round($parte / $total * 100))) : 0;
     @endphp
 
     <div class="tudi-panel on-dark">
         {{-- flex-wrap: en un móvil de 360px la línea de cifras no cabe junto a
              la etiqueta y tiene que poder bajar, no desbordarse. --}}
         <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <span class="tudi-label">{{ __('Hoy') }}</span>
+            <span class="flex items-center gap-2">
+                <span class="tudi-label">{{ __('Hoy') }}</span>
+                @if ($cerrado)
+                    <span class="tudi-chip bg-tudi-dark-2 text-tudi-lime">{{ __('cerrado') }}</span>
+                @endif
+            </span>
             <span class="tudi-meta">
                 {{ $kcal($resumen['calorias_consumidas']) }} / {{ $kcal($resumen['calorias_objetivo']) }} kcal
                 @if ($resumen['calorias_actividad_ajustada'] > 0)
@@ -93,13 +99,18 @@
                 <div class="min-w-0">
                     <p @class([
                         'text-[22px] font-semibold leading-tight tracking-tudi-title',
-                        'text-tudi-on-dark' => ! $saldo['agotado'],
-                        'text-tudi-amber' => $saldo['agotado'],
+                        'text-tudi-on-dark' => ! $enNegativo,
+                        'text-tudi-amber' => $enNegativo,
                     ])>
-                        {{ $saldo['agotado'] ? __('Te pasaste por') : __('Te quedan') }}
-                        <span class="tudi-num">{{ $kcal(abs($saldo['saldo']['calorias'])) }}</span> kcal
+                        {{ $rotulo }} <span class="tudi-num">{{ $kcal($cifra) }}</span> kcal
                     </p>
-                    @if ($pendientesLegible)
+                    @if ($cerrado)
+                        <p class="tudi-meta mt-0.5">
+                            {{ $resumen['calorias_actividad_ajustada'] > 0
+                                ? __('incluye :kcal de actividad', ['kcal' => $kcal($resumen['calorias_actividad_ajustada'])])
+                                : __('resultado del día') }}
+                        </p>
+                    @elseif ($pendientesLegible)
                         <p class="tudi-meta mt-0.5">{{ __('para') }} {{ $pendientesLegible }}</p>
                     @endif
                 </div>
@@ -111,20 +122,39 @@
                 no aplica— cae igualmente al final, después de las comidas.
             --}}
             <div class="mt-5 sm:mt-0">
-                <div class="flex items-baseline justify-between gap-2">
-                    <x-tudi.macro tipo="proteina" variante="palabra" class="tudi-label" />
-                    <span class="tudi-meta text-tudi-on-dark">
-                        {{ $gramos($resumen['proteina_consumida_g']) }} / {{ $gramos($resumen['proteina_objetivo_g']) }} g
-                    </span>
-                </div>
-                <span class="tudi-bar mt-2 block" style="--pct: {{ $proteinaPct }}"><span></span></span>
-
                 {{--
-                    Las comidas pasan de una tarjeta propia con su lista a tres
-                    chips en línea: el estado de cada una es un sí/no, y una
-                    fila de chips lo dice en el mismo golpe de vista que la
-                    cifra de arriba sin ocupar media pantalla.
+                    Los tres macros, no solo la proteína: el objetivo del día
+                    son cuatro cifras (kcal + tres macros) y enseñar una sola
+                    dejaba el panel contando media historia. En carbón van con
+                    la palabra completa, nunca la inicial (sección 5.12).
                 --}}
+                <div class="space-y-2.5">
+                    @foreach ([
+                        ['tipo' => 'proteina', 'real' => $resumen['proteina_consumida_g'], 'objetivo' => $resumen['proteina_objetivo_g'], 'color' => 'var(--tudi-lime)'],
+                        ['tipo' => 'grasa', 'real' => $resumen['grasa_consumida_g'], 'objetivo' => $resumen['grasa_objetivo_g'], 'color' => 'var(--tudi-amber)'],
+                        ['tipo' => 'carbohidratos', 'real' => $resumen['carbohidratos_consumidos_g'], 'objetivo' => $resumen['carbohidratos_objetivo_g'], 'color' => 'var(--tudi-on-dark)'],
+                    ] as $macro)
+                        <div>
+                            <div class="flex items-baseline justify-between gap-2">
+                                <x-tudi.macro :tipo="$macro['tipo']" variante="palabra" class="tudi-label" />
+                                <span class="tudi-meta text-tudi-on-dark">
+                                    {{-- Los días cerrados antes de que el snapshot guardara grasa y
+                                         carbohidratos no tienen estas cifras: ausentes, no cero. --}}
+                                    @if ($macro['real'] === null || $macro['objetivo'] === null)
+                                        —
+                                    @else
+                                        {{ $gramos($macro['real']) }} / {{ $gramos($macro['objetivo']) }} g
+                                    @endif
+                                </span>
+                            </div>
+                            <span class="tudi-bar mt-1.5 block"
+                                  style="--pct: {{ $macro['real'] === null || $macro['objetivo'] === null ? 0 : $porcentaje($macro['real'], $macro['objetivo']) }}">
+                                <span style="background: {{ $macro['color'] }}"></span>
+                            </span>
+                        </div>
+                    @endforeach
+                </div>
+
                 <div class="mt-4 flex flex-wrap gap-2">
                     @foreach ($hoy['estadoComidas'] as $comida)
                         <span @class([
@@ -151,7 +181,7 @@
                      más que la cifra que la gente vino a mirar. --}}
                 <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
                    class="tudi-btn tudi-btn-lime tudi-btn-block mt-5 no-underline sm:w-auto">
-                    {{ __('Abrir el plan de hoy') }}
+                    {{ $cerrado ? __('Ver el detalle del día') : __('Abrir el plan de hoy') }}
                 </a>
             </div>
         </div>

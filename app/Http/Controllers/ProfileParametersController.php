@@ -6,6 +6,7 @@ use App\Exceptions\InvalidNutritionParameterException;
 use App\Exceptions\NegativeCarbohydrateException;
 use App\Http\Requests\ProfileParametersRequest;
 use App\Services\NutritionCalculatorService;
+use App\Services\ObjetivoDelDiaService;
 use App\Services\RecursosDidacticosService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class ProfileParametersController extends Controller
     public function __construct(
         private readonly NutritionCalculatorService $calculadora,
         private readonly RecursosDidacticosService $recursos,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -76,6 +78,14 @@ class ProfileParametersController extends Controller
         $request->user()->fill($datos);
         $request->user()->calorias_objetivo = round($plan['calorias_objetivo'], 2);
         $request->user()->save();
+
+        /*
+         * El cambio alcanza al día de HOY y a ninguno anterior (sección 5.25).
+         * Los días pasados que sigan abiertos se planificaron y se reportaron
+         * contra el objetivo que tenían entonces; reescribirlo ahora mediría su
+         * historial con una regla que nunca se usó para vivirlo.
+         */
+        $this->objetivoDelDia->sellarElDiaDeHoy($request->user());
 
         return Redirect::route('calculadora.edit')->with('status', 'parametros-updated');
     }

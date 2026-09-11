@@ -38,6 +38,7 @@ class PlanDiarioService
 {
     public function __construct(
         private readonly ComidaRealService $comidaRealService,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -76,6 +77,15 @@ class PlanDiarioService
                 'cerrado' => false,
                 'cerrado_en' => null,
             ]);
+
+            /*
+             * "Como recién creado" incluye el sello del objetivo (sección
+             * 5.25): reiniciar solo se ofrece sobre el día de hoy, así que
+             * volver a sellarlo con el perfil vigente es exactamente lo que
+             * haría crearlo de nuevo. Sin esto el día quedaba sin sello y
+             * pasaba a comportarse como un día heredado.
+             */
+            $this->objetivoDelDia->sellar($registroDiario->refresh());
         });
     }
 

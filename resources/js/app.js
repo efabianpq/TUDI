@@ -1,5 +1,6 @@
 import Alpine from 'alpinejs';
 
+import { iniciarBarraInferior } from './tudi/barra-inferior';
 import { iniciarCargando } from './tudi/cargando';
 import { iniciarDictado } from './tudi/dictado';
 import { iniciarFormularios } from './tudi/formularios';
@@ -16,6 +17,7 @@ Alpine.start();
  * vez de repetirse en cada vista.
  */
 document.addEventListener('DOMContentLoaded', () => {
+    iniciarBarraInferior();
     iniciarCargando();
     iniciarDictado();
     iniciarFormularios();

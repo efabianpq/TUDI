@@ -59,6 +59,7 @@ class RulesEngineService
     public function __construct(
         private readonly NutritionAiProviderInterface $aiProvider,
         private readonly ParametrosMaestrosService $parametros,
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
     ) {}
 
     /**
@@ -214,9 +215,17 @@ class RulesEngineService
             ]);
 
             if ($recomendacion->tipo === self::TIPO_AJUSTE_CALORICO && $recomendacion->calorias_objetivo_sugeridas !== null) {
-                $recomendacion->registroDiario->usuario->update([
+                $usuario = $recomendacion->registroDiario->usuario;
+
+                $usuario->update([
                     'calorias_objetivo' => $recomendacion->calorias_objetivo_sugeridas,
                 ]);
+
+                // El objetivo nuevo entra en vigor desde hoy, no hacia atrás
+                // (sección 5.25): mismo criterio que un cambio manual de la
+                // Calculadora. El día en el que nació la recomendación puede
+                // ser de la semana pasada y sus cifras ya están contadas.
+                $this->objetivoDelDia->sellarElDiaDeHoy($usuario);
             }
         });
 

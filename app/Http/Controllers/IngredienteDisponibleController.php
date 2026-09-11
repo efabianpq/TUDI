@@ -6,6 +6,7 @@ use App\Http\Requests\IngredienteDisponibleRequest;
 use App\Http\Requests\UpdateIngredienteDisponibleRequest;
 use App\Models\IngredienteDisponible;
 use App\Models\RegistroDiario;
+use App\Services\ObjetivoDelDiaService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
@@ -13,6 +14,10 @@ use Illuminate\View\View;
 
 class IngredienteDisponibleController extends Controller
 {
+    public function __construct(
+        private readonly ObjetivoDelDiaService $objetivoDelDia,
+    ) {}
+
     /**
      * Show the form to report today's available ingredients.
      */
@@ -46,6 +51,11 @@ class IngredienteDisponibleController extends Controller
                 'usuario_id' => $request->user()->id,
                 'fecha' => now()->toDateString(),
             ]);
+
+            // El día nace con su objetivo sellado (sección 5.25), igual que
+            // cuando lo crea "Crear plan diario".
+            $registroDiario->setRelation('usuario', $request->user());
+            $this->objetivoDelDia->sellar($registroDiario);
         }
 
         foreach ($request->validated('ingredientes') as $ingrediente) {
