@@ -518,20 +518,20 @@
                                         </div>
 
                                         {{--
-                                            Mismo tamaño que "Rehacer solo el X" y negro (tudi-btn-primary):
+                                            Mismo tamaño y color que "Rehacer solo el X" (tudi-btn-secondary):
                                             abrir el reporte de una comida es un paso menor al lado de
                                             "Calcular mi plan", que es la acción que reparte el día
-                                            entero — pero sigue siendo una acción normal, no un enlace
-                                            secundario.
+                                            entero — y por eso no comparte su negro (tudi-btn-primary),
+                                            que en móvil, a ancho completo, resultaba indistinguible.
                                         --}}
                                         <button type="button" x-show="! reportando"
                                                 x-on:click="reportando = true"
-                                                class="tudi-btn tudi-btn-primary mt-3 w-full sm:w-auto">
+                                                class="tudi-btn tudi-btn-secondary mt-3 w-full sm:w-auto">
                                             {{ __('Cerrar') }} {{ $comida['tipo'] }}
                                         </button>
 
                                         <button type="submit" x-show="reportando" style="display: none"
-                                                class="tudi-btn tudi-btn-primary tudi-btn-block mt-4">
+                                                class="tudi-btn tudi-btn-secondary tudi-btn-block mt-4">
                                             {{ __('Confirmar cierre') }}
                                         </button>
 
