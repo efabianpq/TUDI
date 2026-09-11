@@ -21,6 +21,23 @@
     @php
         $metricas = $tendencia['metricas'];
         $ritmo = $metricas['porcentaje_perdida_semanal'];
+
+        /*
+         * `fecha` es una fecha sin hora, así que diffForHumans() diría "hace 9
+         * horas" por la distancia a la medianoche — una precisión que el dato
+         * no tiene. Se cuenta en días, que es la granularidad real del pesaje.
+         */
+        // (int) a propósito: Carbon devuelve un float y "=== 0" nunca casaría.
+        $diasDesdeElPesaje = $tendencia['ultimoPeso']
+            ? (int) $tendencia['ultimoPeso']['fecha']->copy()->startOfDay()->diffInDays(now()->startOfDay())
+            : null;
+
+        $cuandoSePeso = match (true) {
+            $diasDesdeElPesaje === null => null,
+            $diasDesdeElPesaje === 0 => __('hoy'),
+            $diasDesdeElPesaje === 1 => __('ayer'),
+            default => __('hace :dias días', ['dias' => $diasDesdeElPesaje]),
+        };
     @endphp
 
     <section>
@@ -38,7 +55,7 @@
                     <p class="tudi-label">{{ __('Último peso registrado') }}</p>
                     @if ($tendencia['ultimoPeso'])
                         <p class="tudi-num mt-1.5 text-[22px]">{{ $kg($tendencia['ultimoPeso']['peso_kg']) }} kg</p>
-                        <p class="tudi-meta mt-0.5">{{ $tendencia['ultimoPeso']['fecha']->diffForHumans() }}</p>
+                        <p class="tudi-meta mt-0.5">{{ $cuandoSePeso }}</p>
                     @else
                         <p class="tudi-num mt-1.5 text-[22px] text-tudi-muted">—</p>
                         <p class="tudi-meta mt-0.5">{{ __('sin pesajes todavía') }}</p>

@@ -69,7 +69,9 @@
     @endphp
 
     <div class="tudi-panel on-dark">
-        <div class="flex items-center justify-between gap-3">
+        {{-- flex-wrap: en un móvil de 360px la línea de cifras no cabe junto a
+             la etiqueta y tiene que poder bajar, no desbordarse. --}}
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span class="tudi-label">{{ __('Hoy') }}</span>
             <span class="tudi-meta">
                 {{ $kcal($resumen['calorias_consumidas']) }} / {{ $kcal($resumen['calorias_objetivo']) }} kcal
@@ -79,10 +81,10 @@
             </span>
         </div>
 
-        {{-- Móvil: apilado. sm+: el anillo y la cifra a un lado, el progreso al otro. --}}
-        <div class="mt-4 sm:flex sm:items-center sm:gap-8">
-            <div class="flex items-center gap-4 sm:flex-none">
-                <div class="tudi-ring tudi-ring-sm flex-none" style="--pct: {{ $avance }}">
+        {{-- Móvil: apilado. sm+: dos mitades equilibradas, no dos extremos. --}}
+        <div class="mt-4 sm:grid sm:grid-cols-2 sm:items-center sm:gap-6 lg:gap-10">
+            <div class="flex items-center gap-4">
+                <div class="tudi-ring tudi-ring-mini flex-none" style="--pct: {{ $avance }}">
                     <div>
                         <span class="tudi-num text-tudi-on-dark">{{ $avance }}%</span>
                     </div>
@@ -103,7 +105,12 @@
                 </div>
             </div>
 
-            <div class="mt-5 sm:mt-0 sm:flex-1">
+            {{--
+                El CTA vive en esta columna y no fuera del grid: en escritorio
+                equilibra las dos mitades del panel, y en móvil —donde el grid
+                no aplica— cae igualmente al final, después de las comidas.
+            --}}
+            <div class="mt-5 sm:mt-0">
                 <div class="flex items-baseline justify-between gap-2">
                     <x-tudi.macro tipo="proteina" variante="palabra" class="tudi-label" />
                     <span class="tudi-meta text-tudi-on-dark">
@@ -138,12 +145,15 @@
                         </span>
                     @endforeach
                 </div>
+
+                {{-- Ancho completo en móvil (objetivo táctil), al ancho de su
+                     texto en escritorio: ahí una barra lima de 900px gritaría
+                     más que la cifra que la gente vino a mirar. --}}
+                <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
+                   class="tudi-btn tudi-btn-lime tudi-btn-block mt-5 no-underline sm:w-auto">
+                    {{ __('Abrir el plan de hoy') }}
+                </a>
             </div>
         </div>
-
-        <a href="{{ route('planes.show', $hoy['registroDiario']) }}"
-           class="tudi-btn tudi-btn-lime tudi-btn-block mt-5 no-underline">
-            {{ __('Abrir el plan de hoy') }}
-        </a>
     </div>
 @endif

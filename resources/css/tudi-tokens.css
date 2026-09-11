@@ -189,11 +189,13 @@ a:hover { color: var(--tudi-lime-700); }
 /*
  * Variante compacta (Inicio, sección 5.8): el anillo deja de ser la cifra
  * protagonista y pasa a ser el indicador que acompaña a "Te quedan X kcal",
- * con el porcentaje dentro. Mismo grosor de aro relativo, solo cambia el
- * diámetro — no es un componente nuevo, es el mismo a otra escala.
+ * con el porcentaje dentro. Mismo aro, otra escala — no es un componente nuevo.
+ *
+ * Se llama `-mini` y no `-sm` porque `.tudi-ring-sm` (app.css) ya significa
+ * otra cosa: el tamaño de escritorio del anillo grande, 176px.
  */
-.tudi-ring-sm { width: 76px; }
-.tudi-ring-sm > * { width: 78%; font-size: 14px; }
+.tudi-ring-mini { width: 76px; }
+.tudi-ring-mini > * { width: 74%; font-size: 13px; }
 
 /* Barra de macro  ·  --pct = 0..100 */
 .tudi-bar { height: 6px; border-radius: var(--tudi-r-pill); background: var(--tudi-dark-4); overflow: hidden; }

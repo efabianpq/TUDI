@@ -225,6 +225,41 @@ it('Tu tendencia: con 7 días muestra el último peso real y el promedio, por se
         ->assertDontSee('chart.js', false);
 });
 
+it('fecha el último pesaje en días, no en horas desde la medianoche', function () {
+    $usuario = usuarioParaDashboard();
+
+    // Ventana completa, con el pesaje más reciente hace dos días: `fecha` no
+    // guarda hora, así que "hace 9 horas" sería una precisión que el dato no
+    // tiene. Hoy y ayer se dicen por su nombre.
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+            'peso_kg' => $dias >= 2 ? 80.0 + $dias * 0.1 : null,
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('hace 2 días')
+        ->assertDontSee('horas');
+});
+
+it('dice "hoy" cuando el pesaje más reciente es el de hoy', function () {
+    $usuario = usuarioParaDashboard();
+
+    foreach (range(0, 6) as $dias) {
+        RegistroDiario::factory()->for($usuario, 'usuario')->cerrado()->create([
+            'fecha' => now()->subDays($dias)->toDateString(),
+            'peso_kg' => 80.0,
+        ]);
+    }
+
+    $this->actingAs($usuario)->get(route('dashboard'))
+        ->assertOk()
+        ->assertSee('Último peso registrado')
+        ->assertDontSee('hace 0 días');
+});
+
 it('muestra la racha de días seguidos cerrados', function () {
     $usuario = usuarioParaDashboard();
 
