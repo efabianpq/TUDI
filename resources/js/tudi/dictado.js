@@ -103,6 +103,13 @@ const popup = {
     intervalo: null,
     alTerminar: null,
     alCancelar: null,
+    /*
+     * Hace de cerrojo: mientras el popup esté abierto hay un dictado en
+     * curso, y el botón del micrófono ignora los toques siguientes. Sin esto,
+     * dos toques seguidos arrancaban DOS reconocedores sobre el mismo audio y
+     * cada uno escribía su versión en el campo — palabras repetidas.
+     */
+    abierto: false,
 
     inicializar() {
         this.caja = document.getElementById('tudi-dictado');
@@ -124,6 +131,7 @@ const popup = {
 
         this.alTerminar = alTerminar;
         this.alCancelar = alCancelar;
+        this.abierto = true;
         this.parcial('Di en voz alta qué tienes para esta comida.');
         this.caja.hidden = false;
 
@@ -146,6 +154,7 @@ const popup = {
         this.intervalo = null;
         this.alTerminar = null;
         this.alCancelar = null;
+        this.abierto = false;
 
         if (this.caja) {
             this.caja.hidden = true;
@@ -170,6 +179,14 @@ const popup = {
 };
 
 // ── Escritura en el campo ───────────────────────────────────────────────────
+
+/** Pega dos trozos de transcripción con un solo espacio, sin dejar sobrantes. */
+function unir(izquierda, derecha) {
+    const a = (izquierda || '').trim();
+    const b = (derecha || '').trim();
+
+    return a && b ? `${a} ${b}` : (a || b);
+}
 
 function insertarTexto(campo, texto) {
     const limpio = (texto || '').trim();
@@ -215,7 +232,13 @@ function avisar(mensaje) {
 function dictarConElNavegador(campo) {
     const porTramos = necesitaReenganche();
 
+    // Lo confirmado por los tramos YA cerrados. Solo crece al reenganchar, así
+    // que en los navegadores de una sola sesión (Android, escritorio) se queda
+    // vacío de principio a fin.
     let definitivo = '';
+    // Lo confirmado por el tramo en curso. Se reconstruye entero en cada
+    // evento `result` (ver el manejador), nunca se le añade nada por partes.
+    let finalDelTramo = '';
     // Lo que el reconocedor todavía no ha confirmado como definitivo. En
     // iOS Safari, pulsar "Listo" no siempre dispara el evento 'end' a
     // tiempo (a veces no llega nunca si el navegador estaba a mitad de un
@@ -229,6 +252,9 @@ function dictarConElNavegador(campo) {
     let tramosMudos = 0;
     let reconocimiento = null;
 
+    /** Todo lo dictado hasta este instante: tramos cerrados + tramo en curso. */
+    const textoHastaAhora = () => unir(unir(definitivo, finalDelTramo), parcialActual);
+
     const cerrarConTexto = () => {
         if (cerrado) {
             return;
@@ -237,7 +263,7 @@ function dictarConElNavegador(campo) {
         cerrado = true;
         popup.cerrar();
 
-        const texto = huboAlgo ? `${definitivo} ${parcialActual}`.trim() : '';
+        const texto = huboAlgo ? textoHastaAhora() : '';
 
         if (texto) {
             insertarTexto(campo, texto);
@@ -248,32 +274,57 @@ function dictarConElNavegador(campo) {
         const sesion = new (ClaseDeReconocimiento())();
         sesion.lang = 'es-CO';
         sesion.interimResults = true;
+        // Una sola hipótesis por resultado: las alternativas no se usan y
+        // algunos reconocedores de Android las devuelven aunque no se pidan.
+        sesion.maxAlternatives = 1;
         // Safari ignora `true` y corta igual; pedirle `false` deja explícito
         // que aquí el que mantiene la continuidad es el reenganche.
         sesion.continuous = ! porTramos;
 
+        // Cada sesión numera sus resultados desde cero, así que el tramo
+        // empieza en blanco; lo anterior ya está guardado en `definitivo`.
+        finalDelTramo = '';
+        parcialActual = '';
+
         let huboEnEsteTramo = false;
 
         sesion.addEventListener('result', (evento) => {
+            /*
+             * Se reconstruye el tramo ENTERO recorriendo `evento.results`
+             * desde cero, en vez de ir añadiendo lo nuevo desde
+             * `evento.resultIndex`.
+             *
+             * Chrome en Android reenvía resultados que ya había dado por
+             * definitivos, con un `resultIndex` que no siempre avanza: cada
+             * reenvío volvía a concatenar las mismas palabras, y de ahí el
+             * "repite mucho" — no era el micrófono oyendo mal, era el mismo
+             * texto sumado dos y tres veces. Rehacer la cadena completa es
+             * idempotente: da igual cuántas veces llegue el mismo resultado,
+             * porque `results` es la transcripción entera de la sesión.
+             */
+            let confirmado = '';
             let provisional = '';
 
-            for (let i = evento.resultIndex; i < evento.results.length; i += 1) {
-                const trozo = evento.results[i][0].transcript;
+            for (let i = 0; i < evento.results.length; i += 1) {
+                const trozo = evento.results[i][0]?.transcript ?? '';
 
                 if (evento.results[i].isFinal) {
-                    // Entre tramos hace falta el espacio: cada sesión empieza
-                    // su transcripción de cero y no sabe qué se dijo antes.
-                    definitivo = definitivo ? `${definitivo.trim()} ${trozo.trim()}` : trozo;
+                    confirmado = unir(confirmado, trozo);
                 } else {
-                    provisional += trozo;
+                    provisional = unir(provisional, trozo);
                 }
             }
 
-            huboAlgo = true;
-            huboEnEsteTramo = true;
-            tramosMudos = 0;
+            finalDelTramo = confirmado;
             parcialActual = provisional;
-            popup.parcial(`${definitivo} ${provisional}`.trim());
+
+            if (confirmado || provisional) {
+                huboAlgo = true;
+                huboEnEsteTramo = true;
+                tramosMudos = 0;
+            }
+
+            popup.parcial(textoHastaAhora());
         });
 
         sesion.addEventListener('error', (evento) => {
@@ -347,7 +398,16 @@ function dictarConElNavegador(campo) {
                 return;
             }
 
-            // Reenganche: otro tramo, conservando lo dictado hasta ahora.
+            /*
+             * Reenganche: lo que este tramo alcanzó a reconocer pasa al
+             * acumulado ANTES de abrir el siguiente, que empieza su
+             * numeración de resultados desde cero. Se conserva también lo
+             * provisional: la sesión siguiente escucha audio nuevo y no
+             * volverá a reconocer lo ya dicho, así que descartarlo solo
+             * perdería palabras.
+             */
+            definitivo = unir(definitivo, unir(finalDelTramo, parcialActual));
+
             reconocimiento = nuevaSesion();
             arrancar(reconocimiento);
         });
@@ -378,7 +438,10 @@ function dictarConElNavegador(campo) {
         }, { once: true });
 
         setTimeout(() => {
-            if (terminado || cancelado || audioIniciado) {
+            // `huboAlgo` también vale como prueba de vida: si ya llegó
+            // texto, el micrófono está abierto aunque `audiostart` no se
+            // haya disparado en este navegador.
+            if (terminado || cancelado || audioIniciado || huboAlgo) {
                 return;
             }
 
@@ -551,6 +614,13 @@ export function conectarDictado(raiz = document) {
         boton.hidden = false;
 
         boton.addEventListener('click', () => {
+            // Un segundo toque con el popup todavía abierto arrancaría otro
+            // reconocedor sobre el mismo audio, y los dos escribirían en el
+            // campo: el dictado saldría con las palabras repetidas.
+            if (popup.abierto) {
+                return;
+            }
+
             if (hayReconocimiento()) {
                 dictarConElNavegador(campo);
             } else {
