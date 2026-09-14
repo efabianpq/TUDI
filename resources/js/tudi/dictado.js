@@ -40,6 +40,14 @@ const SEGUNDOS_MAXIMOS = 60;
  */
 const TRAMOS_MUDOS_MAXIMOS = 3;
 
+/**
+ * Algunos navegadores de Android conceden el permiso y `start()` no lanza
+ * nada, pero el micrófono nunca llega a abrirse de verdad: no hay `error`,
+ * pero tampoco `audiostart`, así que sin este vigilante el popup se queda
+ * abierto para siempre y el usuario no tiene ninguna pista de qué pasó.
+ */
+const TIEMPO_ESPERA_AUDIO_MS = 4000;
+
 /** Contenedores que pedimos a MediaRecorder, del preferido al aceptable. */
 const FORMATOS = [
     { mime: 'audio/webm;codecs=opus', extension: 'webm' },
@@ -347,9 +355,51 @@ function dictarConElNavegador(campo) {
         return sesion;
     };
 
+    const rendirseSinSonido = () => {
+        terminado = true;
+        popup.cerrar();
+
+        if (hayGrabacion()) {
+            dictarConElServidor(campo);
+
+            return;
+        }
+
+        avisar('No se pudo activar el micrófono. Revisa los permisos del navegador o escríbelo a mano.');
+    };
+
+    // Vigila que el micrófono llegue a abrirse de verdad tras `start()`; ver
+    // TIEMPO_ESPERA_AUDIO_MS.
+    const vigilarAudio = (sesion) => {
+        let audioIniciado = false;
+
+        sesion.addEventListener('audiostart', () => {
+            audioIniciado = true;
+        }, { once: true });
+
+        setTimeout(() => {
+            if (terminado || cancelado || audioIniciado) {
+                return;
+            }
+
+            terminado = true;
+            cancelado = true;
+
+            try {
+                sesion.abort();
+            } catch {
+                // Sin audio que cerrar, abortar es solo higiene.
+            }
+
+            popup.cerrar();
+            avisar('No se pudo activar el micrófono. Revisa los permisos del navegador o escríbelo a mano.');
+        }, TIEMPO_ESPERA_AUDIO_MS);
+    };
+
     const arrancar = (sesion) => {
         try {
             sesion.start();
+            vigilarAudio(sesion);
         } catch {
             // `start()` sobre una sesión que el navegador todavía no cerró:
             // se reintenta en el siguiente tick en vez de perder el dictado.
@@ -360,13 +410,9 @@ function dictarConElNavegador(campo) {
 
                 try {
                     sesion.start();
+                    vigilarAudio(sesion);
                 } catch {
-                    terminado = true;
-                    popup.cerrar();
-
-                    if (hayGrabacion()) {
-                        dictarConElServidor(campo);
-                    }
+                    rendirseSinSonido();
                 }
             }, 250);
         }

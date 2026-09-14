@@ -73,6 +73,20 @@
    Base
    ============================================================ */
 
+/*
+ * Sin esto, arrastrar más allá del final de una pantalla corta (el listado de
+ * Planes, por ejemplo, que no llega a llenar el alto) hace rebotar la página
+ * entera: el rebote desplaza hacia arriba TODO lo que hay pintado —incluidas
+ * la barra superior y la inferior, aunque sean `fixed`, porque el rebote
+ * mueve el viewport visual, no el layout— y deja un hueco del color de fondo
+ * debajo de la barra inferior hasta que la animación de vuelta termina. En
+ * una pantalla más larga el mismo gesto se lee como scroll normal y nunca se
+ * nota; por eso el hueco solo aparecía en pantallas cortas.
+ */
+html, body {
+  overscroll-behavior-y: none;
+}
+
 body {
   margin: 0;
   background: var(--tudi-bg);
