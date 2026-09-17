@@ -22,6 +22,31 @@ const SECCIONES_POR_DEFECTO = '#tudi-avisos,#panel-objetivo,#lista-comidas,#secc
  *
  * El evento \`toggle\` no burbujea, así que se escucha en fase de captura.
  */
+/**
+ * Ejecuta algo que cambia el alto del documento sin que se mueva de sitio lo que
+ * la persona está mirando.
+ *
+ * Al abrir una comida se cierran las demás, y las que quedaban por encima
+ * desaparecen con todo su alto de golpe. El scroll no se ha movido, pero el
+ * contenido sí: la tarjeta recién abierta salta hacia arriba y se sale de la
+ * pantalla, así que hay que volver a buscarla. Se ancla el elemento pulsado a su
+ * posición en el viewport y se corrige el scroll por la diferencia, de modo que
+ * la tarjeta se queda donde estaba cuando se pulsó.
+ */
+function sinSaltoDeScroll(ancla, accion) {
+    const antes = ancla.getBoundingClientRect().top;
+
+    accion();
+
+    // Volver a leer el rect fuerza el reflow, así que esta medida ya incluye el
+    // alto que acaban de perder las tarjetas de arriba.
+    const salto = ancla.getBoundingClientRect().top - antes;
+
+    if (salto !== 0) {
+        window.scrollBy(0, salto);
+    }
+}
+
 function iniciarAcordeon() {
     document.addEventListener('toggle', (evento) => {
         const detalle = evento.target;
@@ -30,10 +55,12 @@ function iniciarAcordeon() {
             return;
         }
 
-        document.querySelectorAll('details[data-comida]').forEach((otro) => {
-            if (otro !== detalle) {
-                otro.open = false;
-            }
+        sinSaltoDeScroll(detalle, () => {
+            document.querySelectorAll('details[data-comida]').forEach((otro) => {
+                if (otro !== detalle) {
+                    otro.open = false;
+                }
+            });
         });
     }, true);
 }

@@ -36,9 +36,14 @@
                     {{ __('Abrir el plan de hoy') }}
                 </a>
             @else
+                {{--
+                    Lima y no carbón: es la misma acción (`planes.crear`) que el
+                    CTA de Inicio, que ya iba en lima, y verla de dos colores
+                    según la pantalla desde la que se llega no tiene defensa.
+                --}}
                 <form method="post" action="{{ route('planes.crear') }}" class="w-full sm:w-auto">
                     @csrf
-                    <button type="submit" class="tudi-btn tudi-btn-primary tudi-btn-block sm:w-auto">
+                    <button type="submit" class="tudi-btn tudi-btn-lime tudi-btn-block sm:w-auto">
                         {{ __('Crear plan diario') }}
                     </button>
                 </form>

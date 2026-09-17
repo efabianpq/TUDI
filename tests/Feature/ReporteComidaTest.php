@@ -612,3 +612,49 @@ test('no se puede repetir la comida frecuente de otra persona', function () {
 
     expect($registroDiario->planesComida()->first()->comidaReal)->toBeNull();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Partir de lo sugerido para ajustar solo las cantidades
+|--------------------------------------------------------------------------
+*/
+
+it('ofrece copiar lo sugerido al campo del reporte, con sus porciones', function () {
+    $usuario = usuarioParaReporte();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    PlanComida::factory()->for($registroDiario, 'registroDiario')->create([
+        'tipo_comida' => 'desayuno',
+        'descripcion' => 'Huevos con arepa',
+        'ingredientes_detalle' => [
+            ['nombre' => 'Huevo', 'porcion' => '100 g (2 unidades)', 'cantidad_g' => 100, 'calorias' => 143, 'proteina_g' => 12.6, 'grasa_g' => 9.5, 'carbohidratos_g' => 0.7],
+            ['nombre' => 'Arepa', 'porcion' => '80 g', 'cantidad_g' => 80, 'calorias' => 170, 'proteina_g' => 3.0, 'grasa_g' => 2.5, 'carbohidratos_g' => 34.0],
+        ],
+        'calorias_estimadas' => 313,
+        'proteina_g' => 15.6,
+        'grasa_g' => 12,
+        'carbohidratos_g' => 34.7,
+    ]);
+
+    $respuesta = $this->actingAs($usuario)->get(route('planes.show', $registroDiario));
+
+    // Casi nunca se cumple el plan al gramo, y reescribir la comida entera para
+    // corregir una cantidad es lo que hace que se deje de reportar.
+    $respuesta->assertOk()
+        ->assertSee('Copiar lo sugerido y ajustar cantidades')
+        ->assertSee('Huevo 100 g (2 unidades), Arepa 80 g', false);
+});
+
+it('no ofrece copiar nada cuando la comida no tiene plan previo', function () {
+    $usuario = usuarioParaReporte();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $this->actingAs($usuario)
+        ->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertDontSee('Copiar lo sugerido y ajustar cantidades');
+});

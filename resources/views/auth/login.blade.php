@@ -24,10 +24,15 @@
             <x-input-error :messages="$errors->get('password')" class="mt-2" />
         </div>
 
-        <!-- Remember Me -->
+        {{--
+            Marcado por defecto: se entra casi siempre desde el acceso directo
+            del móvil, y ahí lo que se espera de una aplicación es seguir dentro,
+            no volver a teclear la contraseña. Sin esto solo aguantaba lo que
+            durara la sesión. Quien comparta el dispositivo puede desmarcarlo.
+        --}}
         <div class="block mt-4">
             <label for="remember_me" class="inline-flex items-center">
-                <input id="remember_me" type="checkbox" class="rounded border-tudi-input-border text-tudi-lime-700 shadow-sm focus:ring-tudi-lime-700" name="remember">
+                <input id="remember_me" type="checkbox" checked class="rounded border-tudi-input-border text-tudi-lime-700 shadow-sm focus:ring-tudi-lime-700" name="remember">
                 <span class="ms-2 text-sm text-tudi-ink-3">{{ __('Remember me') }}</span>
             </label>
         </div>

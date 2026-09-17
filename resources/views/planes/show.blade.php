@@ -263,6 +263,20 @@
                         $real = $plan?->comidaReal;
                         $cerrada = $comida['estado'] === 'registrada';
                         $abierta = $comida['tipo'] === $comidaAbierta;
+
+                        // Lo sugerido, escrito como lo escribiría la persona, para
+                        // poder llevarlo al campo del reporte y corregir ahí las
+                        // cantidades (sección 5.5). Se usan los ingredientes con su
+                        // porción —que es lo que hay que retocar— y solo se cae a la
+                        // descripción cuando el plan no trae detalle.
+                        $textoSugerido = collect($plan?->ingredientes_detalle ?? [])
+                            ->map(fn (array $ingrediente): string => trim(($ingrediente['nombre'] ?? '').' '.($ingrediente['porcion'] ?? '')))
+                            ->filter()
+                            ->implode(', ');
+
+                        if ($textoSugerido === '') {
+                            $textoSugerido = (string) ($plan?->descripcion ?? '');
+                        }
                     @endphp
 
                     <details class="tudi-card" data-comida="{{ $comida['tipo'] }}" {{ $abierta ? 'open' : '' }}>
@@ -477,6 +491,34 @@
                                                         <span class="tudi-switch"></span>
                                                         <span class="sr-only">{{ __('Sí, comí lo que se sugirió') }}</span>
                                                     </label>
+                                                </div>
+                                            @endif
+
+                                            {{--
+                                                Ajustar lo sugerido sin reescribirlo entero. Casi nunca
+                                                se cumple el plan al gramo, y obligar a teclear de cero
+                                                una comida que solo cambió en las cantidades es justo
+                                                lo que hace que se deje de reportar. El botón copia la
+                                                sugerencia al campo de abajo —igual que los chips de
+                                                comidas frecuentes: escribe y nada más, no envía— y ahí
+                                                se corrigen los gramos.
+
+                                                Como el texto sale editado, este camino SÍ pasa por la
+                                                IA y gasta cuota (sección 5.5). El atajo gratuito sigue
+                                                siendo el interruptor de "Cumplí lo sugerido", que es
+                                                el de arriba y no se toca.
+                                            --}}
+                                            @if ($plan && ! $comida['sinPlanPrevio'] && $textoSugerido !== '')
+                                                <div class="mt-3" x-show="! cumplio">
+                                                    <button type="button"
+                                                            x-on:click="
+                                                                $refs.texto.value = @js($textoSugerido);
+                                                                $refs.texto.dispatchEvent(new Event('input'));
+                                                                $refs.texto.focus();
+                                                            "
+                                                            class="tudi-btn tudi-btn-secondary text-[13px]">
+                                                        {{ __('Copiar lo sugerido y ajustar cantidades') }}
+                                                    </button>
                                                 </div>
                                             @endif
 
