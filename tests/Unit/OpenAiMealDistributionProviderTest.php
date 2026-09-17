@@ -482,3 +482,129 @@ it('no menciona ningún entrenamiento cuando no se registró actividad', functio
         return ! str_contains($prompt, 'ENTRENAMIENTO');
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| La densidad es un dato, los gramos son la decisión
+|--------------------------------------------------------------------------
+|
+| Regresión del caso que motivó el cambio: un almuerzo con objetivo de 827 kcal
+| devolvió una sopa de frijol a 48 kcal/100 g —la mitad de lo que dice cualquier
+| tabla— servida en 400 g, de modo que el total caía clavado en el presupuesto.
+| Con un único campo "calorías de la porción", el modelo tenía dos variables
+| libres —la densidad del alimento y los gramos— y la más barata de mover era
+| justo la que no debía moverse.
+|
+*/
+
+/**
+ * Un almuerzo de una sola comida con la forma NUEVA del esquema: composición
+ * por 100 g más gramos asignados, sin ninguna cifra ya multiplicada.
+ */
+function almuerzoConDensidadDeOpenAi(array $ingredientes): array
+{
+    return ['comidas' => [[
+        'tipo_comida' => 'almuerzo',
+        'descripcion' => 'Sopa de frijol',
+        'preparacion' => '',
+        'notas' => '',
+        'alimentos_reconocidos' => true,
+        'ingredientes' => $ingredientes,
+    ]]];
+}
+
+function almuerzoDeSopa(float $objetivoKcal, float $objetivoProteina): array
+{
+    return ['almuerzo' => [
+        'texto' => 'tengo sopa de frijol',
+        'objetivos' => ['calorias' => $objetivoKcal, 'proteina_g' => $objetivoProteina, 'grasa_g' => 3.0, 'carbohidratos_g' => 29.0],
+    ]];
+}
+
+function sopaHonesta(float $kcalPor100g = 95, float $cantidad = 200, string $detalle = 'con frijoles, caldo y verduras'): array
+{
+    return ['nombre' => 'Sopa de frijol casera', 'kcal_por_100g' => $kcalPor100g, 'proteina_por_100g' => 5.5, 'grasa_por_100g' => 1.5, 'carbohidratos_por_100g' => 14.5, 'cantidad_g' => $cantidad, 'unidad' => 'g', 'detalle' => $detalle];
+}
+
+it('calcula las calorías de la porción en PHP, multiplicando densidad por gramos', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(almuerzoConDensidadDeOpenAi([sopaHonesta()])))]);
+
+    $resultado = (new OpenAiMealDistributionProvider)->distribuirDia(almuerzoDeSopa(190.0, 11.0), contextoDeEjemploOpenAi());
+
+    $sopa = $resultado['almuerzo']['ingredientes'][0];
+
+    // 200 g × 95 kcal/100 g = 190 kcal. Esa cifra no puede venir del modelo: el
+    // esquema ya no tiene ningún campo donde pudiera haberla escrito.
+    expect($sopa['calorias'])->toBe(190.0)
+        ->and($sopa['proteina_g'])->toBe(11.0)
+        ->and($sopa['grasa_g'])->toBe(3.0)
+        ->and($sopa['carbohidratos_g'])->toBe(29.0)
+        // La densidad se conserva: es el dato que dice, ante una cifra rara, si
+        // falló la tabla o la ración.
+        ->and($sopa['por_100g']['kcal'])->toBe(95.0);
+});
+
+it('no le ofrece al modelo ningún campo donde declarar las calorías de la porción', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(almuerzoConDensidadDeOpenAi([sopaHonesta()])))]);
+
+    (new OpenAiMealDistributionProvider)->distribuirDia(almuerzoDeSopa(190.0, 11.0), contextoDeEjemploOpenAi());
+
+    Http::assertSent(function ($peticion) {
+        $ingrediente = $peticion->data()['response_format']['json_schema']['schema']['properties']['comidas']['items']['properties']['ingredientes']['items'];
+
+        $campos = array_keys($ingrediente['properties']);
+
+        return ! in_array('calorias', $campos, true)
+            // El orden no es cosmético: la salida estructurada se genera campo a
+            // campo, así que la densidad queda comprometida ANTES de que el
+            // modelo sepa cuántos gramos le caben en el presupuesto.
+            && array_search('kcal_por_100g', $campos, true) < array_search('cantidad_g', $campos, true);
+    });
+});
+
+it('corrige con Atwater una densidad que se contradice con sus propios macros', function () {
+    // La sopa del informe de error: 48 kcal/100 g declaradas junto a unos macros
+    // que suman 93,5. Mandan los macros, tres cifras que se sostienen entre sí,
+    // sobre una kcal suelta que las contradice.
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(almuerzoConDensidadDeOpenAi([sopaHonesta(kcalPor100g: 48)])))]);
+
+    $resultado = (new OpenAiMealDistributionProvider)->distribuirDia(almuerzoDeSopa(187.0, 11.0), contextoDeEjemploOpenAi());
+
+    // 5,5 × 4 + 1,5 × 9 + 14,5 × 4 = 93,5 kcal/100 g → 200 g son 187 kcal, no 96.
+    expect($resultado['almuerzo']['ingredientes'][0]['por_100g']['kcal'])->toBe(93.5)
+        ->and($resultado['almuerzo']['ingredientes'][0]['calorias'])->toBe(187.0);
+});
+
+it('compone la porción con los mismos gramos que entraron al cálculo', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(almuerzoConDensidadDeOpenAi([
+        sopaHonesta(),
+        ['nombre' => 'Caldo', 'kcal_por_100g' => 10, 'proteina_por_100g' => 1.0, 'grasa_por_100g' => 0.3, 'carbohidratos_por_100g' => 0.5, 'cantidad_g' => 150, 'unidad' => 'ml', 'detalle' => ''],
+    ])))]);
+
+    $resultado = (new OpenAiMealDistributionProvider)->distribuirDia(almuerzoDeSopa(205.0, 12.5), contextoDeEjemploOpenAi());
+
+    // La compone PHP: antes `porcion` y `cantidad_g` eran campos independientes
+    // que podían contradecirse, y dejaban a la persona leyendo una ración
+    // distinta de la que entró al balance de su día.
+    expect($resultado['almuerzo']['ingredientes'][0]['porcion'])->toBe('200 g (con frijoles, caldo y verduras)')
+        ->and($resultado['almuerzo']['ingredientes'][1]['porcion'])->toBe('150 ml');
+});
+
+it('no le pasa el objetivo del día al estimar lo que ya se comió', function () {
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(comidasDesviadasDeOpenAi(['almuerzo'])))]);
+
+    (new OpenAiMealDistributionProvider)->estimarConsumoReal([
+        'almuerzo' => [
+            'texto' => 'me comí un sándwich de pollo',
+            'plan' => ['descripcion' => 'Pollo con arroz', 'calorias' => 597.5, 'proteina_g' => 54.0, 'grasa_g' => 8.1, 'carbohidratos_g' => 72.0],
+        ],
+    ], ['calorias_objetivo_dia' => 2112.0]);
+
+    Http::assertSent(function ($peticion) {
+        $prompt = collect($peticion->data()['messages'])->pluck('content')->implode("\n");
+
+        // Aquí no hay nada que cuadrar, así que la cifra del objetivo del día no
+        // podía hacer otra cosa que funcionar de ancla. Lo comido, comido está.
+        return ! str_contains($prompt, '2.112');
+    });
+});
