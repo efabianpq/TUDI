@@ -125,23 +125,60 @@ test('el intento fallido en el proveedor también gasta cuota', function () {
     expect($cuotas->restantes($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION))->toBe($limite - 1);
 });
 
-test('el plan diario dice cuántos ajustes quedan hoy', function () {
+test('el plan diario calla la cuota hasta que está cerca del límite, y entonces la cuenta', function () {
     $usuario = usuarioConCuota();
     $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
         'fecha' => now()->toDateString(),
     ]);
 
-    $limite = app(CuotaIaService::class)->limite(CuotaIaService::CONCEPTO_DISTRIBUCION);
+    $cuotas = app(CuotaIaService::class);
+    $limite = $cuotas->limite(CuotaIaService::CONCEPTO_DISTRIBUCION);
+    $umbral = (int) ceil($limite * CuotaIaService::UMBRAL_AVISO);
+
+    // Con el día entero por delante, el contador no ayuda a decidir nada y le
+    // roba la atención a registrar la comida (regla 8, sección 13).
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('Calcular mi plan')
+        ->assertDontSee("de {$limite} hoy.");
+
+    // Justo por debajo del umbral sigue callado.
+    for ($i = 0; $i < $umbral - 1; $i++) {
+        $cuotas->consumir($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION);
+    }
 
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee("Te quedan {$limite} de {$limite} hoy.");
+        ->assertDontSee("de {$limite} hoy.");
 
-    app(CuotaIaService::class)->consumir($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION);
+    // Al cruzarlo aparece, ya con una cifra que puede cambiar lo que hace luego.
+    $cuotas->consumir($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION);
 
     $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
         ->assertOk()
-        ->assertSee('Te quedan '.($limite - 1)." de {$limite} hoy.");
+        ->assertSee('Te quedan '.($limite - $umbral)." de {$limite} hoy.");
+});
+
+test('el aviso de cuota del cierre de comida tampoco sale con el día entero por delante', function () {
+    $usuario = usuarioConCuota();
+    $registroDiario = RegistroDiario::factory()->for($usuario, 'usuario')->create([
+        'fecha' => now()->toDateString(),
+    ]);
+
+    $cuotas = app(CuotaIaService::class);
+    $limite = $cuotas->limite(CuotaIaService::CONCEPTO_REPORTE);
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertDontSee('Contarlo por escrito usa IA');
+
+    for ($i = 0; $i < (int) ceil($limite * CuotaIaService::UMBRAL_AVISO); $i++) {
+        $cuotas->consumir($usuario, CuotaIaService::CONCEPTO_REPORTE);
+    }
+
+    $this->actingAs($usuario)->get(route('planes.show', $registroDiario))
+        ->assertOk()
+        ->assertSee('Contarlo por escrito usa IA');
 });
 
 test('sin cuota, el plan diario esconde el botón y explica qué se puede seguir haciendo', function () {
@@ -194,4 +231,42 @@ test('la consola de administración ofrece los dos límites de IA', function () 
         ->assertSee('Límites de IA')
         ->assertSee('Ajustes de plan al día')
         ->assertSee('Reportes con IA al día');
+});
+
+/*
+|--------------------------------------------------------------------------
+| El umbral a partir del cual se cuenta en voz alta
+|--------------------------------------------------------------------------
+*/
+
+test('cercaDelLimite solo es cierto a partir del 80% consumido', function () {
+    $usuario = usuarioConCuota();
+    $cuotas = app(CuotaIaService::class);
+    $limite = $cuotas->limite(CuotaIaService::CONCEPTO_DISTRIBUCION);
+    $umbral = (int) ceil($limite * CuotaIaService::UMBRAL_AVISO);
+
+    expect($cuotas->cercaDelLimite($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION))->toBeFalse();
+
+    for ($i = 0; $i < $umbral - 1; $i++) {
+        $cuotas->consumir($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION);
+    }
+
+    expect($cuotas->cercaDelLimite($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION))->toBeFalse();
+
+    $cuotas->consumir($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION);
+
+    expect($cuotas->cercaDelLimite($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION))->toBeTrue()
+        // Y sigue siéndolo con la cuota ya agotada, que es cuando más importa.
+        ->and($cuotas->agotada($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION))->toBeFalse();
+});
+
+test('un límite de cero avisa siempre: ahí el mensaje explica, no cuenta', function () {
+    ParametroMaestro::create([
+        'clave' => CuotaIaService::PARAMETRO_POR_CONCEPTO[CuotaIaService::CONCEPTO_DISTRIBUCION],
+        'valor' => '0',
+    ]);
+    app(ParametrosMaestrosService::class)->olvidarCache();
+
+    expect(app(CuotaIaService::class)->cercaDelLimite(usuarioConCuota(), CuotaIaService::CONCEPTO_DISTRIBUCION))
+        ->toBeTrue();
 });

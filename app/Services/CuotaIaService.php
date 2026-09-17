@@ -75,6 +75,13 @@ class CuotaIaService
 
     public const LIMITE_REPORTES_DIA = 15;
 
+    /**
+     * Fracción del límite a partir de la cual la pantalla empieza a contar en
+     * voz alta cuánta cuota queda. Con los valores de fábrica: se avisa a partir
+     * de la décima distribución (de 12) y del duodécimo reporte (de 15).
+     */
+    public const UMBRAL_AVISO = 0.8;
+
     public function __construct(
         private readonly ParametrosMaestrosService $parametros,
     ) {}
@@ -103,6 +110,34 @@ class CuotaIaService
     public function agotada(User $usuario, string $concepto): bool
     {
         return $this->restantes($usuario, $concepto) <= 0;
+    }
+
+    /**
+     * ¿Conviene ya enseñarle cuánta cuota le queda?
+     *
+     * True cuando ha consumido al menos `UMBRAL_AVISO` de su límite del día.
+     *
+     * Por debajo de ese punto la pantalla no dice nada. A quien le quedan 15 de
+     * 15 el contador no le aporta ninguna decisión —no va a racionar algo que le
+     * sobra— y sí compite por la atención con lo único que importa ahí, que es
+     * registrar la comida (regla 8, sección 13: la ayuda va en el placeholder o
+     * detrás de un "¿Cómo funciona?", nunca como párrafo permanente). El aviso
+     * solo se gana la pantalla cuando el límite está cerca de verdad y puede
+     * cambiar lo que la persona hace a continuación.
+     *
+     * Un límite de 0 o menos avisa siempre: ahí no hay cuota que gastar y el
+     * mensaje deja de ser un contador para pasar a explicar qué sí se puede
+     * hacer.
+     */
+    public function cercaDelLimite(User $usuario, string $concepto): bool
+    {
+        $limite = $this->limite($concepto);
+
+        if ($limite <= 0) {
+            return true;
+        }
+
+        return $this->consumidas($usuario, $concepto) >= $limite * self::UMBRAL_AVISO;
     }
 
     /**

@@ -577,13 +577,24 @@
                                             {{ __('Confirmar cierre') }}
                                         </button>
 
-                                        <p class="mt-2 text-center text-xs text-tudi-muted" x-show="reportando" style="display: none">
-                                            @if ($cuotaReporte > 0)
-                                                {{ __('Contarlo por escrito usa IA (te quedan :restantes de :limite hoy). Cumplir lo sugerido o enviar sin cambios lo que sueles comer, no.', ['restantes' => $cuotaReporte, 'limite' => $limiteReporte]) }}
-                                            @else
-                                                {{ __('Usaste tus :limite reportes con IA de hoy. Puedes cerrar la comida cumpliendo lo sugerido o enviando sin cambios lo que sueles comer.', ['limite' => $limiteReporte]) }}
-                                            @endif
-                                        </p>
+                                        {{--
+                                            El contador de cuota solo aparece cerca del
+                                            límite (CuotaIaService::UMBRAL_AVISO). Con 15 de
+                                            15 disponibles no ayuda a decidir nada y le roba
+                                            la atención a lo único que importa aquí, que es
+                                            registrar la comida. Agotada sí se dice siempre,
+                                            porque entonces deja de ser un contador y pasa a
+                                            explicar qué se puede hacer igualmente.
+                                        --}}
+                                        @if ($avisarCuotaReporte)
+                                            <p class="mt-2 text-center text-xs text-tudi-muted" x-show="reportando" style="display: none">
+                                                @if ($cuotaReporte > 0)
+                                                    {{ __('Contarlo por escrito usa IA (te quedan :restantes de :limite hoy). Cumplir lo sugerido o enviar sin cambios lo que sueles comer, no.', ['restantes' => $cuotaReporte, 'limite' => $limiteReporte]) }}
+                                                @else
+                                                    {{ __('Usaste tus :limite reportes con IA de hoy. Puedes cerrar la comida cumpliendo lo sugerido o enviando sin cambios lo que sueles comer.', ['limite' => $limiteReporte]) }}
+                                                @endif
+                                            </p>
+                                        @endif
                                     </form>
                                 @endif
                             </div>
@@ -600,9 +611,12 @@
                             </button>
                             <p class="mt-2 text-center text-xs text-tudi-muted">
                                 {{ __('Reparte lo que te queda del día entre las comidas que faltan.') }}
-                                <span class="whitespace-nowrap">
-                                    {{ __('Te quedan :restantes de :limite hoy.', ['restantes' => $cuotaDistribucion, 'limite' => $limiteDistribucion]) }}
-                                </span>
+                                {{-- El contador, solo cerca del límite: ver la nota del cierre de comida. --}}
+                                @if ($avisarCuotaDistribucion)
+                                    <span class="whitespace-nowrap">
+                                        {{ __('Te quedan :restantes de :limite hoy.', ['restantes' => $cuotaDistribucion, 'limite' => $limiteDistribucion]) }}
+                                    </span>
+                                @endif
                             </p>
                         @else
                             {{-- Cuota diaria agotada (sección 5.20): se dice qué SÍ se puede hacer. --}}

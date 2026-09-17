@@ -143,6 +143,10 @@ class PlanComidaController extends Controller
             'cuotaReporte' => $this->cuotas->restantes($usuario, CuotaIaService::CONCEPTO_REPORTE),
             'limiteDistribucion' => $this->cuotas->limite(CuotaIaService::CONCEPTO_DISTRIBUCION),
             'limiteReporte' => $this->cuotas->limite(CuotaIaService::CONCEPTO_REPORTE),
+            // Y si toca decírselo ya: el contador solo aparece cerca del límite,
+            // no desde la primera pulsación del día (CuotaIaService::UMBRAL_AVISO).
+            'avisarCuotaDistribucion' => $this->cuotas->cercaDelLimite($usuario, CuotaIaService::CONCEPTO_DISTRIBUCION),
+            'avisarCuotaReporte' => $this->cuotas->cercaDelLimite($usuario, CuotaIaService::CONCEPTO_REPORTE),
             // Por qué la sección de recomendaciones está vacía (sección 5.6).
             'diagnosticoRecomendaciones' => null,
         ];

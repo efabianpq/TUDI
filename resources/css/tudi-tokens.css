@@ -131,7 +131,7 @@ a:hover { color: var(--tudi-lime-700); }
   min-height: 48px; padding: 0 var(--tudi-s-6);
   border: 0; border-radius: var(--tudi-r-md);
   font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
-  cursor: pointer; transition: background .15s ease, color .15s ease;
+  cursor: pointer; transition: background .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 .tudi-btn-block { width: 100%; }
 
@@ -140,11 +140,36 @@ a:hover { color: var(--tudi-lime-700); }
 .tudi-btn-primary:hover  { background: #262219; }
 .tudi-btn-primary:active { background: #0F0E0C; }
 
-/* Primario sobre fondo OSCURO: lima con tinta carbón. */
-.on-dark .tudi-btn-primary,
-.tudi-btn-lime { background: var(--tudi-lime); color: var(--tudi-ink); }
+/* Primario sobre fondo OSCURO: lima con tinta carbón, sin contorno — el propio
+   panel ya recorta el botón. */
+.on-dark .tudi-btn-primary { background: var(--tudi-lime); color: var(--tudi-ink); }
+
+/*
+ * Lima como relleno de botón, también sobre CREMA (sección 5.12: la excepción
+ * acordada para las acciones que hacen avanzar el día).
+ *
+ * Nació para los paneles carbón, donde el lima brillante recorta solo contra el
+ * oscuro y no necesita nada más. Sobre crema (#EFE9DE) ese mismo relleno pierde
+ * el canto: los dos son claros y cálidos, el borde se deshace y el botón deja de
+ * leerse como una pieza — se ve "raro" sin que se sepa señalar por qué. El borde
+ * en lima oscura y la sombra de 1px le devuelven el contorno, y al pulsar la
+ * sombra desaparece y el botón baja ese píxel, que es el gesto que hace que se
+ * sienta como un botón. Ningún color nuevo: los dos salen de los tokens.
+ */
+.tudi-btn-lime {
+  background: var(--tudi-lime); color: var(--tudi-ink);
+  border: 1px solid var(--tudi-lime-700);
+  box-shadow: 0 1px 0 var(--tudi-lime-700);
+}
 .tudi-btn-lime:hover  { background: var(--tudi-lime-600); }
-.tudi-btn-lime:active { background: var(--tudi-lime-700); color: #FFFDF8; }
+.tudi-btn-lime:active {
+  background: var(--tudi-lime-700); color: #FFFDF8;
+  box-shadow: none; transform: translateY(1px);
+}
+
+/* Dentro de un panel carbón el contorno sobra y ensucia. */
+.tudi-panel .tudi-btn-lime,
+.on-dark .tudi-btn-lime { border-color: transparent; box-shadow: none; }
 
 .tudi-btn-secondary { background: transparent; color: var(--tudi-ink-2); border: 1px solid var(--tudi-input-border); }
 .tudi-btn-secondary:hover { background: var(--tudi-surface); }
