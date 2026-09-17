@@ -88,11 +88,14 @@ it('abre una sola comida a la vez en el plan diario', function () {
         ->getContent();
 
     // Una sola lista: cada tarjeta lleva dentro todo lo de esa comida —los
-    // ingredientes, lo planificado y su cierre (sección 5.5)—, así que tres
-    // acordeones y uno solo abierto. La sección de actividad física es otro
+    // ingredientes, lo planificado y su cierre (sección 5.5)—, más la de Extras
+    // (sección 5.27), que participa del mismo acordeón aunque no sea una comida.
+    // Cuatro tarjetas y una sola abierta. La sección de actividad física es otro
     // <details> y no entra en la cuenta.
-    expect(substr_count($contenido, 'data-comida="'))->toBe(3)
+    expect(substr_count($contenido, 'data-comida="'))->toBe(4)
+        ->and(substr_count($contenido, 'data-comida="extras"'))->toBe(1)
         ->and(substr_count($contenido, 'data-comida="desayuno" open>'))->toBe(1)
+        // Extras nunca arranca abierta: se ofrece, no se reclama.
         ->and(substr_count($contenido, ' open>'))->toBe(1);
 });
 

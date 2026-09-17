@@ -124,17 +124,25 @@ class MealDistributionService
             'carbohidratos_g' => $objetivos['dia']['carbohidratos_g'],
         ];
 
-        $planes = $registroDiario->planesComida()->with('comidaReal')->get()->keyBy('tipo_comida');
+        $planes = $registroDiario->planesComida()->with('comidaReal')->get();
 
         $consumido = ['calorias' => 0.0, 'proteina_g' => 0.0, 'grasa_g' => 0.0, 'carbohidratos_g' => 0.0];
-        $pendientes = [];
 
-        foreach (array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS) as $tipoComida) {
-            $real = $planes->get($tipoComida)?->comidaReal;
+        /*
+         * Lo consumido son TODAS las ComidaReal del día, no solo las de las tres
+         * comidas con reparto: también los extras (sección 5.27).
+         *
+         * Antes esto recorría DISTRIBUCION_COMIDAS sobre un `keyBy('tipo_comida')`,
+         * así que un extra no contaba y, con varios, solo sobrevivía el último.
+         * El cierre del día, en cambio, siempre sumó todas las ComidaReal sin
+         * mirar el tipo (DailyClosureService::calcular): el saldo en vivo y el
+         * cierre podían decir cosas distintas del mismo día. Este es el criterio
+         * bueno, y ahora los dos usan el mismo.
+         */
+        foreach ($planes as $plan) {
+            $real = $plan->comidaReal;
 
             if ($real === null) {
-                $pendientes[] = $tipoComida;
-
                 continue;
             }
 
@@ -143,6 +151,20 @@ class MealDistributionService
             $consumido['grasa_g'] += (float) $real->grasa_g;
             $consumido['carbohidratos_g'] += (float) $real->carbohidratos_g;
         }
+
+        /*
+         * Pendientes, en cambio, SÍ son solo las comidas con reparto: un extra
+         * nunca está "pendiente" porque no se planifica — pasa o no pasa. Mismo
+         * criterio que DailyClosureService::comidasSinReportar().
+         */
+        $reportadas = $planes->filter(fn (PlanComida $plan): bool => $plan->comidaReal !== null)
+            ->pluck('tipo_comida')
+            ->all();
+
+        $pendientes = array_values(array_filter(
+            array_keys(MealPlanGeneratorService::DISTRIBUCION_COMIDAS),
+            fn (string $tipoComida): bool => ! in_array($tipoComida, $reportadas, true),
+        ));
 
         $saldo = [];
 

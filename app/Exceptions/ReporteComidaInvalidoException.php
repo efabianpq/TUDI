@@ -54,6 +54,17 @@ class ReporteComidaInvalidoException extends RuntimeException
      * La comida frecuente que se quiso repetir no es del usuario o ya no
      * existe (un historial borrado entre que se pintó la pantalla y se pulsó).
      */
+    /**
+     * Un extra sin nada escrito. Mensaje propio y no `sinContenido()`: aquí no
+     * existe "cumplí lo sugerido" que ofrecer, porque no se sugirió nada.
+     */
+    public static function extraSinContenido(): self
+    {
+        return new self(
+            'Cuéntanos qué tomaste o picaste, o repite uno de tus extras habituales.'
+        );
+    }
+
     public static function plantillaNoDisponible(): self
     {
         return new self(

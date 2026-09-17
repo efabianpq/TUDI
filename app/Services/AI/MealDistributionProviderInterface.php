@@ -67,7 +67,12 @@ interface MealDistributionProviderInterface
      * —lo comido, comido está— sino que estimar lo más fielmente posible lo que
      * describe el texto, con el plan sugerido como referencia de porciones.
      *
-     * @param  array<string, array{texto: string, plan: array{descripcion: string, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}}>  $comidas  indexadas por tipo de comida
+     * `plan` es OPCIONAL: solo se manda cuando de verdad hubo una sugerencia que
+     * sirva de referencia de porciones. Se omite al estimar un extra (sección
+     * 5.27) y cualquier comida que nunca se planificó — antes se mandaba un plan
+     * de ceros, que no es "no hay plan" sino "se le sugirió no comer nada".
+     *
+     * @param  array<string, array{texto: string, plan?: array{descripcion: string, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}}>  $comidas  indexadas por tipo de comida
      * @param  array{calorias_objetivo_dia: float}  $contextoDia
      * @return array<string, array{descripcion: string, preparacion: string, notas: string, ingredientes: array<int, array{nombre: string, porcion: string, cantidad_g: float, calorias: float, proteina_g: float, grasa_g: float, carbohidratos_g: float}>}>
      *

@@ -608,3 +608,18 @@ it('no le pasa el objetivo del día al estimar lo que ya se comió', function ()
         return ! str_contains($prompt, '2.112');
     });
 });
+
+it('no recorta la densidad de una bebida alcohólica, cuyos macros no explican sus calorías', function () {
+    // Una cerveza son ~43 kcal/100 g con unos macros que suman 16: el alcohol
+    // aporta 7 kcal/g y no es proteína, ni grasa, ni carbohidrato. Corregir
+    // hacia abajo la dejaría contada a un tercio de lo que es.
+    Http::fake(['api.openai.com/*' => Http::response(respuestaDeOpenAi(almuerzoConDensidadDeOpenAi([
+        ['nombre' => 'Cerveza', 'kcal_por_100g' => 43, 'proteina_por_100g' => 0.5, 'grasa_por_100g' => 0, 'carbohidratos_por_100g' => 3.6, 'cantidad_g' => 330, 'unidad' => 'ml', 'detalle' => '1 botella'],
+    ])))]);
+
+    $resultado = (new OpenAiMealDistributionProvider)->distribuirDia(almuerzoDeSopa(141.9, 1.65), contextoDeEjemploOpenAi());
+
+    expect($resultado['almuerzo']['ingredientes'][0]['por_100g']['kcal'])->toBe(43.0)
+        ->and($resultado['almuerzo']['ingredientes'][0]['calorias'])->toBe(141.9)
+        ->and($resultado['almuerzo']['ingredientes'][0]['porcion'])->toBe('330 ml (1 botella)');
+});

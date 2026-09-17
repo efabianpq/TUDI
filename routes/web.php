@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin;
 use App\Http\Controllers\CierreDiarioController;
 use App\Http\Controllers\ComidaRealController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExtraController;
 use App\Http\Controllers\IngredienteDisponibleController;
 use App\Http\Controllers\LandingController;
 use App\Http\Controllers\PlanComidaController;
@@ -83,6 +84,14 @@ Route::middleware(['auth', 'cuenta.activa'])->group(function () {
     // comida va en la URL y lo valida el controlador contra DISTRIBUCION_COMIDAS.
     Route::post('/planes/{registroDiario}/comidas/{tipoComida}/cerrar', [ReporteComidaController::class, 'cerrar'])->name('comidas.cerrar');
     Route::post('/planes/{registroDiario}/comidas/{tipoComida}/reabrir', [ReporteComidaController::class, 'reabrir'])->name('comidas.reabrir');
+
+    /*
+     * Extras del día (sección 5.27): lo de fuera de las tres comidas. Rutas
+     * propias porque un extra no tiene plan que cerrar y se añade N veces al
+     * día, a diferencia de una comida, que se cierra una vez y se reabre.
+     */
+    Route::post('/planes/{registroDiario}/extras', [ExtraController::class, 'store'])->name('extras.store');
+    Route::delete('/planes/{registroDiario}/extras/{extra}', [ExtraController::class, 'destroy'])->name('extras.destroy');
 
     // Las dos acciones destructivas del plan diario (sección 5.16).
     Route::post('/planes/{registroDiario}/resetear', [PlanComidaController::class, 'resetear'])->name('planes.resetear');

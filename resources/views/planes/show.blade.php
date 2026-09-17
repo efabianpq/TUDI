@@ -602,6 +602,128 @@
                     </details>
                 @endforeach
 
+                {{--
+                    ── Extras (sección 5.27) ──
+
+                    Cuarta tarjeta del acordeón, pero NO una cuarta comida: no
+                    tiene plan, ni "Rehacer", ni porcentaje del reparto. Un extra
+                    no recibe presupuesto — gasta el saldo, y por eso al añadir
+                    uno el panel de arriba pasa a enseñar menos para lo que falta.
+
+                    Discreta pero visible: si se esconde, nadie registra la
+                    cerveza y el déficit del día miente; si se convierte en un
+                    panel grande con estado vacío, invita a llenarla.
+                --}}
+                @php
+                    $totalExtras = $extras->sum(fn ($extra) => (float) ($extra->comidaReal?->calorias_reales ?? 0));
+                @endphp
+
+                <details class="tudi-card" data-comida="extras" {{ $comidaAbierta === 'extras' ? 'open' : '' }}>
+                    <summary class="flex min-h-[56px] cursor-pointer list-none items-center justify-between gap-3 p-4">
+                        <span class="flex items-center gap-2.5">
+                            <span @class([
+                                'h-2 w-2 flex-none rounded-full',
+                                'bg-tudi-lime' => $extras->isNotEmpty(),
+                                'bg-tudi-input-border' => $extras->isEmpty(),
+                            ])></span>
+                            <span class="font-semibold tracking-tudi-title">{{ __('Extras') }}</span>
+                        </span>
+                        <span class="tudi-meta">
+                            @if ($extras->isNotEmpty())
+                                {{ $kcal($totalExtras) }} kcal
+                            @else
+                                {{ __('nada aún') }}
+                            @endif
+                        </span>
+                    </summary>
+
+                    <div class="px-4 pb-4">
+                        @if ($extras->isNotEmpty())
+                            <ul class="space-y-1.5">
+                                @foreach ($extras as $extra)
+                                    <li class="flex items-baseline justify-between gap-3 text-[13px] text-tudi-ink-3">
+                                        <span>{{ $extra->comidaReal->notas ?: __('Extra') }}</span>
+                                        <span class="flex flex-none items-center gap-2">
+                                            <span class="tudi-meta">{{ $kcal($extra->comidaReal->calorias_reales) }} kcal</span>
+                                            @unless ($registroDiario->cerrado)
+                                                <form method="post" data-fetch
+                                                      action="{{ route('extras.destroy', [$registroDiario, $extra]) }}">
+                                                    @csrf
+                                                    @method('delete')
+                                                    <button type="submit"
+                                                            aria-label="{{ __('Quitar este extra') }}"
+                                                            class="grid h-11 w-11 place-items-center rounded-full text-tudi-muted hover:bg-tudi-surface">
+                                                        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                </form>
+                                            @endunless
+                                        </span>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+
+                        @unless ($registroDiario->cerrado)
+                            <form method="post" action="{{ route('extras.store', $registroDiario) }}"
+                                  enctype="multipart/form-data" data-fetch
+                                  data-cargando="{{ __('Anotando tu extra') }}…"
+                                  data-cargando-pistas="{{ __('Estamos estimando qué aporta.') }}|{{ __('Después entra en el saldo de tu día.') }}"
+                                  x-data="{ repetir: '' }"
+                                  @class(['mt-3' => $extras->isNotEmpty()])>
+                                @csrf
+
+                                {{-- Mismo atajo que en las comidas (sección 5.22): la gaseosa
+                                     de siempre se repite de un toque y no cuesta una llamada. --}}
+                                @if ($extrasFrecuentes->isNotEmpty())
+                                    <div class="mb-3 flex flex-wrap gap-2">
+                                        @foreach ($extrasFrecuentes as $frecuente)
+                                            <button type="button"
+                                                    x-on:click="
+                                                        $refs.textoExtra.value = @js($frecuente['etiqueta']);
+                                                        $refs.textoExtra.dispatchEvent(new Event('input'));
+                                                        repetir = '{{ $frecuente['comida_real_id'] }}';
+                                                        $refs.textoExtra.focus();
+                                                    "
+                                                    class="tudi-btn tudi-btn-secondary text-[13px]">
+                                                {{ $frecuente['etiqueta'] }}
+                                                <span class="tudi-meta">· {{ $kcal($frecuente['calorias']) }} kcal</span>
+                                            </button>
+                                        @endforeach
+                                    </div>
+
+                                    <input type="hidden" name="repetir" :value="repetir">
+                                @endif
+
+                                <div class="relative">
+                                    <label for="extra-texto" class="sr-only">{{ __('Qué tomaste o picaste') }}</label>
+                                    <textarea id="extra-texto" name="texto" rows="2"
+                                              data-dictado
+                                              x-ref="textoExtra"
+                                              x-on:input="repetir = ''"
+                                              placeholder="{{ __('Una gaseosa, un postre, algo de picar…') }}"
+                                              class="tudi-input pe-14"></textarea>
+
+                                    <button type="button"
+                                            data-boton-dictado="extra-texto"
+                                            hidden
+                                            aria-label="{{ __('Dictar por voz') }}"
+                                            class="absolute end-2 top-2 grid h-11 w-11 place-items-center rounded-full text-tudi-muted hover:bg-tudi-surface">
+                                        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm7-3a7 7 0 0 1-14 0m7 7v3" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <button type="submit" class="tudi-btn tudi-btn-secondary tudi-btn-block mt-3 sm:w-auto">
+                                    {{ __('Añadir extra') }}
+                                </button>
+                            </form>
+                        @endunless
+                    </div>
+                </details>
+
                 {{-- ── Una sola acción para las tres comidas ── --}}
                 @if ($quedaAlgoQueAjustar)
                     <div class="pt-1.5">

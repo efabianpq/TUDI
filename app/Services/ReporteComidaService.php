@@ -9,6 +9,7 @@ use App\Models\ComidaReal;
 use App\Models\PlanComida;
 use App\Models\RegistroDiario;
 use App\Services\AI\MealDistributionProviderInterface;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 
 /**
@@ -49,6 +50,19 @@ use Illuminate\Http\UploadedFile;
  */
 class ReporteComidaService
 {
+    /**
+     * Tipo de comida con el que se guardan los extras (sección 5.27).
+     *
+     * `snack` ya estaba en el enum de `planes_comida` desde la primera migración
+     * y nunca se había usado, así que esto no añade ninguna columna ni ningún
+     * valor nuevo. **A propósito NO está en DISTRIBUCION_COMIDAS**: esa constante
+     * declara quién recibe parte del reparto del día, y un extra justamente no
+     * recibe ninguna. Gracias a eso los chips de Inicio, el checklist de
+     * diagnóstico y `comidasSinReportar()` siguen hablando de tres comidas sin
+     * tocar una línea.
+     */
+    public const TIPO_EXTRA = 'snack';
+
     public function __construct(
         private readonly MealDistributionProviderInterface $proveedor,
         private readonly MealDistributionService $distribucion,
@@ -107,6 +121,120 @@ class ReporteComidaService
     }
 
     /**
+     * Registra un EXTRA del día: una cerveza, un postre de media tarde, unas
+     * galletas (CLAUDE.md sección 5.27).
+     *
+     * ── En qué se diferencia de cerrar una comida ──────────────────────────
+     *
+     * Un extra no se planifica: pasa. De ahí las tres diferencias con
+     * `reportar()`, y ninguna es cosmética:
+     *
+     *  - **No recibe presupuesto.** No entra en DISTRIBUCION_COMIDAS y por tanto
+     *    no tiene su parte del reparto. Darle un 10 % del día convertiría a TUDI
+     *    en cómplice —"tienes 200 kcal de cerveza asignadas hoy"— y además
+     *    dejaría cortas a las tres comidas los días en que no se pica nada. Lo
+     *    que hace es **gastar el saldo**: se registra, el saldo del día baja y
+     *    "Calcular mi plan" reparte menos entre las comidas que faltan. La
+     *    lección la da la aritmética sola, sin sermón (sección 5.21).
+     *  - **No hay "cumplí lo sugerido".** No se sugirió nada que cumplir.
+     *  - **Se pueden registrar varios al día**, así que no existe la guarda de
+     *    "ya reportada": cada uno es su propia fila.
+     *
+     * @param  array{texto?: string|null, imagen?: UploadedFile|null, repetir?: int|string|null}  $respuesta
+     *
+     * @throws ReporteComidaInvalidoException cuando no se dice qué se consumió
+     * @throws MealDistributionUnavailableException cuando el proveedor no puede interpretar el texto
+     * @throws DayAlreadyClosedException cuando el día ya está cerrado
+     */
+    public function registrarExtra(RegistroDiario $registroDiario, array $respuesta): ComidaReal
+    {
+        $imagen = ($respuesta['imagen'] ?? null) instanceof UploadedFile ? $respuesta['imagen'] : null;
+        $texto = isset($respuesta['texto']) ? trim((string) $respuesta['texto']) : '';
+        $repetir = $respuesta['repetir'] ?? null;
+
+        $repetida = filled($repetir)
+            ? $this->frecuentes->deUsuario($registroDiario->usuario, (int) $repetir)
+                ?? throw ReporteComidaInvalidoException::plantillaNoDisponible()
+            : null;
+
+        $datos = match (true) {
+            $repetida !== null && ($texto === '' || $this->frecuentes->coincideCon($repetida, $texto)) => $this->desdeComidaFrecuente($repetida),
+            $texto !== '' => $this->desdeTexto($registroDiario, self::TIPO_EXTRA, null, $texto),
+            default => throw ReporteComidaInvalidoException::extraSinContenido(),
+        };
+
+        return $this->comidaRealService->registrar(
+            $this->planDeExtra($registroDiario),
+            $datos,
+            $imagen,
+        );
+    }
+
+    /**
+     * Borra un extra del día.
+     *
+     * `ComidaRealService::eliminar()` ya hace todo lo que hace falta: se lleva la
+     * imagen, borra la ComidaReal, **borra también el PlanComida por ser
+     * `origen = reporte`** —sin su ComidaReal no queda nada dentro— y recalcula
+     * las calorías consumidas del día. Aquí solo se comprueba que la fila sea de
+     * verdad un extra de ese día.
+     *
+     * Igual que reabrir una comida, borrar un extra NO devuelve cuota de IA
+     * (sección 5.20): si la devolviera, añadir y borrar el mismo extra sería una
+     * llamada gratis infinita.
+     *
+     * @throws DayAlreadyClosedException cuando el día ya está cerrado
+     */
+    public function eliminarExtra(RegistroDiario $registroDiario, PlanComida $extra): bool
+    {
+        if ($extra->registro_diario_id !== $registroDiario->id || ! $this->esExtra($extra)) {
+            return false;
+        }
+
+        return $this->comidaRealService->eliminar($extra);
+    }
+
+    /**
+     * Los extras del día, del más reciente al más antiguo.
+     *
+     * @return Collection<int, PlanComida>
+     */
+    public function extrasDelDia(RegistroDiario $registroDiario)
+    {
+        return $registroDiario->planesComida()
+            ->with('comidaReal')
+            ->where('tipo_comida', self::TIPO_EXTRA)
+            ->where('origen', PlanComida::ORIGEN_REPORTE)
+            ->has('comidaReal')
+            ->get()
+            ->sortByDesc(fn (PlanComida $extra): string => (string) $extra->comidaReal?->consumido_en)
+            ->values();
+    }
+
+    private function esExtra(PlanComida $plan): bool
+    {
+        return $plan->tipo_comida === self::TIPO_EXTRA && $plan->esReporteSinPlan();
+    }
+
+    /**
+     * El PlanComida que sostiene un extra. Macros a cero, igual que cualquier
+     * reporte sin plan: no se sugirió nada, y ponerle las cifras de lo consumido
+     * lo haría parecer un plan cumplido al milímetro.
+     */
+    private function planDeExtra(RegistroDiario $registroDiario): PlanComida
+    {
+        return $registroDiario->planesComida()->create([
+            'tipo_comida' => self::TIPO_EXTRA,
+            'origen' => PlanComida::ORIGEN_REPORTE,
+            'descripcion' => __('Extra'),
+            'calorias_estimadas' => 0,
+            'proteina_g' => 0,
+            'grasa_g' => 0,
+            'carbohidratos_g' => 0,
+        ]);
+    }
+
+    /**
      * "Sí, cumplí lo sugerido": los macros del plan, tal cual.
      *
      * @return array{calorias_reales: float, proteina_g: float, grasa_g: float, carbohidratos_g: float, notas: string}
@@ -155,21 +283,27 @@ class ReporteComidaService
     {
         $objetivos = $this->distribucion->objetivosDelRegistro($registroDiario);
 
+        /*
+         * `plan` va solo si de verdad hubo una sugerencia. Antes se mandaba
+         * siempre, y sin plan previo salía un plan de ceros: eso no le dice al
+         * modelo "no había plan", le dice "se le sugirió no comer nada", que es
+         * una referencia falsa que además tira de la estimación hacia abajo. Un
+         * extra (sección 5.27) nunca tiene plan, por definición.
+         */
+        $comida = ['texto' => $texto];
+
+        if ($plan !== null && ! $plan->esReporteSinPlan()) {
+            $comida['plan'] = [
+                'descripcion' => (string) $plan->descripcion,
+                'calorias' => (float) $plan->calorias_estimadas,
+                'proteina_g' => (float) $plan->proteina_g,
+                'grasa_g' => (float) $plan->grasa_g,
+                'carbohidratos_g' => (float) $plan->carbohidratos_g,
+            ];
+        }
+
         $estimaciones = $this->proveedor->estimarConsumoReal(
-            [
-                $tipoComida => [
-                    'texto' => $texto,
-                    // Sin plan previo no hay referencia de porciones que dar: se
-                    // manda la comida vacía en vez de inventar una sugerencia.
-                    'plan' => [
-                        'descripcion' => (string) ($plan?->descripcion ?? ''),
-                        'calorias' => (float) ($plan?->calorias_estimadas ?? 0),
-                        'proteina_g' => (float) ($plan?->proteina_g ?? 0),
-                        'grasa_g' => (float) ($plan?->grasa_g ?? 0),
-                        'carbohidratos_g' => (float) ($plan?->carbohidratos_g ?? 0),
-                    ],
-                ],
-            ],
+            [$tipoComida => $comida],
             ['calorias_objetivo_dia' => $objetivos['dia']['calorias_objetivo']],
         );
 

@@ -19,6 +19,7 @@ use App\Services\NutritionCalculatorService;
 use App\Services\ObjetivoDelDiaService;
 use App\Services\PlanDiarioService;
 use App\Services\RepartoComidasService;
+use App\Services\ReporteComidaService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -68,6 +69,7 @@ class PlanComidaController extends Controller
         private readonly CuotaIaService $cuotas,
         private readonly ComidasFrecuentesService $frecuentes,
         private readonly ObjetivoDelDiaService $objetivoDelDia,
+        private readonly ReporteComidaService $reporte,
     ) {}
 
     /**
@@ -127,6 +129,14 @@ class PlanComidaController extends Controller
             'errorPerfil' => null,
             'objetivos' => null,
             'comidas' => [],
+            /*
+             * Extras del día (sección 5.27): lo consumido fuera de las tres
+             * comidas. Van en el bloque base y no detrás de `perfilCompleto`
+             * como `comidas`, porque un extra no recibe reparto y por tanto no
+             * necesita que haya objetivos calculados: se registra y gasta saldo.
+             */
+            'extras' => $this->reporte->extrasDelDia($registroDiario),
+            'extrasFrecuentes' => $this->frecuentes->paraComida($usuario, ReporteComidaService::TIPO_EXTRA),
             'actividad' => null,
             'actividades' => $registroDiario->actividadesFisicas()->latest()->get(),
             'resumenCierre' => null,
