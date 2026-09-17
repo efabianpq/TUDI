@@ -595,7 +595,7 @@
                 @if ($quedaAlgoQueAjustar)
                     <div class="pt-1.5">
                         @if ($cuotaDistribucion > 0)
-                            <button type="submit" form="tudi-ajustar-plan" class="tudi-btn tudi-btn-primary tudi-btn-block">
+                            <button type="submit" form="tudi-ajustar-plan" class="tudi-btn tudi-btn-lime tudi-btn-block">
                                 {{ __('Calcular mi plan') }}
                             </button>
                             <p class="mt-2 text-center text-xs text-tudi-muted">
