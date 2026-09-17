@@ -24,3 +24,6 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Credenciales de acceso al servidor: nunca al repositorio.
+DATOS_ACCESOS.txt
